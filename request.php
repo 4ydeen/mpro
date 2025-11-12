@@ -38,27 +38,32 @@ class CurlRequest {
             $headers[] = "Authorization: Bearer {$this->authToken}";
         }
         if ($this->api_key) {
-            $headers[] = $this->authToken;
+            $headers[] = "X-API-Key: {$this->api_key}";
         }
 
         return $headers;
     }
 
     private function execute($method, $data = null) {
-        $this->timeout = !$this->timeout  ?  8000 : $this->timeout;
+        $this->timeout = !$this->timeout ? 8 : $this->timeout;
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $this->url);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT_MS, $this->timeout);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 6);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $this->timeout);
+        curl_setopt($ch, CURLOPT_ENCODING, '');
+        curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
 
         $finalHeaders = $this->prepareHeaders();
         if (!empty($finalHeaders)) {
             curl_setopt($ch, CURLOPT_HTTPHEADER, $finalHeaders);
         }
         if ($this->cookie) {
-         curl_setopt($ch, CURLOPT_COOKIEFILE, $this->cookie);   
+            curl_setopt($ch, CURLOPT_COOKIEFILE, $this->cookie);
+            curl_setopt($ch, CURLOPT_COOKIEJAR, $this->cookie);
         }
         if ($data) {
             if (is_array($data)) {
@@ -71,7 +76,11 @@ class CurlRequest {
         if (curl_errno($ch)) {
             $error = curl_error($ch);
             curl_close($ch);
-            return ['error' => $error];
+            return [
+                'status' => null,
+                'body' => null,
+                'error' => $error,
+            ];
         }
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);

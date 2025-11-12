@@ -1,8 +1,8 @@
 <?php
 session_start();
-require_once '../config.php';
-require_once '../botapi.php';
-require_once '../function.php';
+require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../botapi.php';
+require_once __DIR__ . '/../function.php';
 $query = $pdo->prepare("SELECT * FROM admin WHERE username=:username");
 $query->bindParam("username", $_SESSION["user"], PDO::PARAM_STR);
 $query->execute();
@@ -69,10 +69,12 @@ if(isset($_GET['priceadd']) and$_GET['priceadd']){
 }
 if(isset($_GET['pricelow']) and $_GET['pricelow']){
     $priceadd = number_format($_GET['pricelow'],0);
-     if (strlen($setting['Channel_Report']) > 0) {
+    $textlow = "⚠️ کاربر عزیز مبلغ {$priceadd} تومان از موجودی کیف پول تان کسر گردید.";
+    sendmessage($_GET['id'], $textlow, null, 'HTML');
+    if (strlen($setting['Channel_Report']) > 0) {
         $textaddbalance = "📌 یک ادمین موجودی کاربر را از پنل تحت وب کسر کرده است :
-        
-🪪 اطلاعات ادمین کسر کننده موجودی : 
+
+🪪 اطلاعات ادمین کسر کننده موجودی :
 نام کاربری : {$_SESSION['user']}
 👤 اطلاعات کاربر :
 آیدی عددی کاربر  : {$_GET['id']}

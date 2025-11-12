@@ -2,6 +2,21 @@
 require_once 'config.php';
 $setting = select("setting", "*", null, null,"select");
 $textbotlang = languagechange(__DIR__.'/text.json');
+if (!is_array($textbotlang)) {
+    $textbotlang = [];
+}
+if (!isset($textbotlang['Admin']) || !is_array($textbotlang['Admin'])) {
+    $textbotlang['Admin'] = [];
+}
+$textbotlang['Admin']['backadmin'] = $textbotlang['Admin']['backadmin'] ?? "🏠 بازگشت به منوی مدیریت";
+$textbotlang['Admin']['backmenu'] = $textbotlang['Admin']['backmenu'] ?? "▶️ بازگشت به منوی قبل";
+if (!function_exists('getPaySettingValue')) {
+    function getPaySettingValue($name)
+    {
+        $result = select("PaySetting", "ValuePay", "NamePay", $name, "select");
+        return $result['ValuePay'] ?? null;
+    }
+}
 //-----------------------------[  text panel  ]-------------------------------
 $stmt = $pdo->prepare("SHOW TABLES LIKE 'textbot'");
 $stmt->execute();
@@ -30,6 +45,7 @@ $datatextbot = array(
     'iranpay2' => '',
     'iranpay3' => '',
     'aqayepardakht' => '',
+    'zarinpey' => '',
     'zarinpal' => '',
     'text_fq' => '',
     'textpaymentnotverify' =>"",
@@ -88,64 +104,79 @@ $replacements = [
 ];
 $admin_idss = select("admin", "*", "id_admin", $from_id,"count");
 $temp_addtional_key = [];
-if($setting['inlinebtnmain'] == "oninline"){
-    $trace_keyboard = json_decode($setting['keyboardmain'],true)['keyboard'];
-    foreach ($trace_keyboard as $key => $callback_set){
-  foreach ($callback_set as $keyboard_key =>$keyboard){
-      if($keyboard['text'] == "text_sell"){
-          $trace_keyboard[$key][$keyboard_key]['callback_data'] = "buy";
-      }
-      if($keyboard['text'] == "accountwallet"){
-          $trace_keyboard[$key][$keyboard_key]['callback_data'] = "account";
-      }
-      if($keyboard['text'] == "accountwallet"){
-          $trace_keyboard[$key][$keyboard_key]['callback_data'] = "account";
-      }
-      if($keyboard['text'] == "text_Tariff_list"){
-          $trace_keyboard[$key][$keyboard_key]['callback_data'] = "Tariff_list";
-      }
-      if($keyboard['text'] == "text_wheel_luck"){
-          $trace_keyboard[$key][$keyboard_key]['callback_data'] = "wheel_luck";
-      }
-      if($keyboard['text'] == "text_affiliates"){
-          $trace_keyboard[$key][$keyboard_key]['callback_data'] = "affiliatesbtn";
-      }
-      if($keyboard['text'] == "text_extend"){
-          $trace_keyboard[$key][$keyboard_key]['callback_data'] = "extendbtn";
-      }
-      if($keyboard['text'] == "text_support"){
-          $trace_keyboard[$key][$keyboard_key]['callback_data'] = "supportbtns";
-      }
-      if($keyboard['text'] == "text_Purchased_services"){
-          $trace_keyboard[$key][$keyboard_key]['callback_data'] = "backorder";
-      }
-      if($keyboard['text'] == "text_help"){
-          $trace_keyboard[$key][$keyboard_key]['callback_data'] = "helpbtns";
-      }
-      if($keyboard['text'] == "text_usertest"){
-          $trace_keyboard[$key][$keyboard_key]['callback_data'] = "usertestbtn";
-      }
-  }
+$keyboardLayout = json_decode($setting['keyboardmain'], true);
+$keyboardRows = [];
+if (is_array($keyboardLayout) && isset($keyboardLayout['keyboard']) && is_array($keyboardLayout['keyboard'])) {
+    $keyboardRows = $keyboardLayout['keyboard'];
 }
-    if ($admin_idss != 0)$temp_addtional_key[] = ['text' => $textbotlang['Admin']['textpaneladmin'], 'callback_data' => "admin"];
-    if($users['agent'] != "f")$temp_addtional_key[] = ['text' => $datatextbot['textpanelagent'], 'callback_data' => "agentpanel"];
-    if($users['agent'] == "f" and $setting['statusagentrequest'] == "onrequestagent")$temp_addtional_key[] = ['text' => $datatextbot['textrequestagent'], 'callback_data' => "requestagent"];
+
+if ($setting['inlinebtnmain'] == "oninline" && !empty($keyboardRows)) {
+    $trace_keyboard = $keyboardRows;
+    foreach ($trace_keyboard as $key => $callback_set) {
+        foreach ($callback_set as $keyboard_key => $keyboard) {
+            if ($keyboard['text'] == "text_sell") {
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "buy";
+            }
+            if ($keyboard['text'] == "accountwallet") {
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "account";
+            }
+            if ($keyboard['text'] == "text_Tariff_list") {
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "Tariff_list";
+            }
+            if ($keyboard['text'] == "text_wheel_luck") {
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "wheel_luck";
+            }
+            if ($keyboard['text'] == "text_affiliates") {
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "affiliatesbtn";
+            }
+            if ($keyboard['text'] == "text_extend") {
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "extendbtn";
+            }
+            if ($keyboard['text'] == "text_support") {
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "supportbtns";
+            }
+            if ($keyboard['text'] == "text_Purchased_services") {
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "backorder";
+            }
+            if ($keyboard['text'] == "text_help") {
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "helpbtns";
+            }
+            if ($keyboard['text'] == "text_usertest") {
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "usertestbtn";
+            }
+        }
+    }
+    if ($admin_idss != 0) {
+        $temp_addtional_key[] = ['text' => $textbotlang['Admin']['textpaneladmin'], 'callback_data' => "admin"];
+    }
+    if ($users['agent'] != "f") {
+        $temp_addtional_key[] = ['text' => $datatextbot['textpanelagent'], 'callback_data' => "agentpanel"];
+    }
+    if ($users['agent'] == "f" && $setting['statusagentrequest'] == "onrequestagent") {
+        $temp_addtional_key[] = ['text' => $datatextbot['textrequestagent'], 'callback_data' => "requestagent"];
+    }
     $keyboard = ['inline_keyboard' => []];
     $keyboardcustom = $trace_keyboard;
-    $keyboardcustom = json_decode(strtr(strval(json_encode($keyboardcustom)), $replacements),true);
+    $keyboardcustom = json_decode(strtr(strval(json_encode($keyboardcustom)), $replacements), true);
     $keyboardcustom[] = $temp_addtional_key;
     $keyboard['inline_keyboard'] = $keyboardcustom;
-    $keyboard  = json_encode($keyboard);
-}else{
-if ($admin_idss != 0)$temp_addtional_key[] = ['text' => $textbotlang['Admin']['textpaneladmin']];
-if($users['agent'] != "f")$temp_addtional_key[] = ['text' => $datatextbot['textpanelagent']];
-if($users['agent'] == "f" and $setting['statusagentrequest'] == "onrequestagent")$temp_addtional_key[] = ['text' => $datatextbot['textrequestagent']];
-$keyboard = ['keyboard' => [],'resize_keyboard' => true];
-$keyboardcustom = json_decode($setting['keyboardmain'],true)['keyboard'];
-$keyboardcustom = json_decode(strtr(strval(json_encode($keyboardcustom)), $replacements),true);
-$keyboardcustom[] = $temp_addtional_key;
-$keyboard['keyboard'] = $keyboardcustom;
-$keyboard  = json_encode($keyboard);
+    $keyboard = json_encode($keyboard);
+} else {
+    if ($admin_idss != 0) {
+        $temp_addtional_key[] = ['text' => $textbotlang['Admin']['textpaneladmin']];
+    }
+    if ($users['agent'] != "f") {
+        $temp_addtional_key[] = ['text' => $datatextbot['textpanelagent']];
+    }
+    if ($users['agent'] == "f" && $setting['statusagentrequest'] == "onrequestagent") {
+        $temp_addtional_key[] = ['text' => $datatextbot['textrequestagent']];
+    }
+    $keyboard = ['keyboard' => [], 'resize_keyboard' => true];
+    $keyboardcustom = $keyboardRows;
+    $keyboardcustom = json_decode(strtr(strval(json_encode($keyboardcustom)), $replacements), true);
+    $keyboardcustom[] = $temp_addtional_key;
+    $keyboard['keyboard'] = $keyboardcustom;
+    $keyboard = json_encode($keyboard);
 }
 
 $keyboardPanel = json_encode([
@@ -166,7 +197,7 @@ $keyboardadmin = json_encode([
         [['text' => $textbotlang['Admin']['btnkeyboardadmin']['managruser']],['text' => "🏬 تنظیمات فروشگاه"]],
         [['text' => "💎 مالی"]],
         [['text' => "🤙 بخش پشتیبانی"],['text' => "📚 بخش آموزش"]],
-        [['text' => "🆕 آپدیت ربات"],['text' => "🛠 قابلیت های پنل"]],
+        [['text' => "📑 نوع مرزبان"],['text' => "🛠 قابلیت های پنل"]],
         [['text' => "⚙️ تنظیمات عمومی"],['text' => "💵 رسید های تایید نشده"]],
         [['text' => $textbotlang['users']['backbtn']]]
     ],
@@ -213,9 +244,10 @@ $CartManage = json_encode([
 ]);
 $trnado = json_encode([
     'keyboard' => [
-        [['text' => "🗂 نام درگاه ارزی ریالی دوم"]],
-        [['text' => "API T"]],
-        [['text' => "تنظیم آدرس api"]],
+        [['text' => "🏷️ نام نمایشی درگاه ترنادو"]],
+        [['text' => "🔑 ثبت API Key ترنادو"]],
+        [['text' => "💼 ثبت آدرس ولت ترون (TRC20)"]],
+        [['text' => "🌐 ثبت آدرس API ترنادو"]],
         [['text' => "💰 کش بک ارزی ریالی دوم"]],
         [['text' => "⬇️ حداقل مبلغ ارزی ریالی دوم"],['text' => "⬆️ حداکثر مبلغ ارزی ریالی دوم"]],
         [['text' => "📚 تنظیم آموزش ارزی ریالی  دوم"]],
@@ -230,6 +262,17 @@ $keyboardzarinpal = json_encode([
         [['text' => "⬇️ حداقل مبلغ زرین پال"],['text' => "⬆️ حداکثر مبلغ زرین پال"]],
         [['text' => "📚 تنظیم آموزش زرین پال"]],
         [['text' => $textbotlang['Admin']['backadmin']],['text' => $textbotlang['Admin']['backmenu']]]
+    ],
+    'resize_keyboard' => true
+]);
+$keyboardzarinpey = json_encode([
+    'keyboard' => [
+        [['text' => "🗂 نام درگاه زرین پی"], ['text' => "🔑 توکن زرین پی"]],
+        [['text' => "💰 کش بک زرین پی"]],
+        [['text' => "🧑🏼‍💻 اموزش اتصال"]],
+        [['text' => "⬇️ حداقل مبلغ زرین پی"], ['text' => "⬆️ حداکثر مبلغ زرین پی"]],
+        [['text' => "📚 تنظیم آموزش زرین پی"]],
+        [['text' => $textbotlang['Admin']['backadmin']], ['text' => $textbotlang['Admin']['backmenu']]]
     ],
     'resize_keyboard' => true
 ]);
@@ -253,37 +296,50 @@ $NowPaymentsManage = json_encode([
     ],
     'resize_keyboard' => true
 ]);
-$setting_panel =  json_encode([
-    'keyboard' => [
-        [['text' => "⚙️ وضعیت قابلیت ها"]],
-        [['text' => "📣 گزارشات ربات"], ['text' => "📯 تنظیمات کانال"]],
-        [['text' => "✅ فعالسازی پنل تحت وب"]],
-        [['text' => "🗑 بهینه سازی ربات "]],
-        [['text' => "📝 تنظیم متن ربات"],['text' => "👨‍🔧 بخش ادمین"]],
-        [['text' => "➕ محدودیت ساخت اکانت تست برای همه"]],
-        [['text' => "💰 مبلغ عضویت نمایندگی"],['text' => "🖼 پس زمینه کیوآرکد"]],
-        [['text' => "🔗 وبهوک مجدد ربات های نماینده"]],
-        [['text' => $textbotlang['Admin']['backadmin']],['text' => $textbotlang['Admin']['backmenu']]]
-    ],
+$mainAdminId = isset($adminnumber) ? trim((string) $adminnumber) : '';
+$currentUserId = isset($from_id) ? trim((string) $from_id) : '';
+
+$settingPanelRows = [
+    [['text' => "⚙️ وضعیت قابلیت ها"]],
+    [['text' => "📣 گزارشات ربات"], ['text' => "📯 تنظیمات کانال"]],
+    [['text' => "✅ فعالسازی پنل تحت وب"]],
+    [['text' => "🗑 بهینه سازی ربات "]],
+];
+
+if ($mainAdminId === '' || $currentUserId === $mainAdminId) {
+    $settingPanelRows[] = [['text' => "💀 بازنشانی ربات "]];
+}
+
+$settingPanelRows = array_merge($settingPanelRows, [
+    [['text' => "📝 تنظیم متن ربات"], ['text' => "👨‍🔧 بخش ادمین"]],
+    [['text' => "➕ محدودیت ساخت اکانت تست برای همه"]],
+    [['text' => "💰 مبلغ عضویت نمایندگی"], ['text' => "🖼 پس زمینه کیوآرکد"]],
+    [['text' => "🔗 وبهوک مجدد ربات های نماینده"]],
+    [['text' => $textbotlang['Admin']['backadmin']], ['text' => $textbotlang['Admin']['backmenu']]],
+]);
+
+$setting_panel = json_encode([
+    'keyboard' => $settingPanelRows,
     'resize_keyboard' => true
 ]);
-$PaySettingcard = select("PaySetting", "ValuePay", "NamePay", "Cartstatus","select")['ValuePay'];
-$PaySettingnow = select("PaySetting", "ValuePay", "NamePay", "nowpaymentstatus","select")['ValuePay'];
-$PaySettingaqayepardakht = select("PaySetting", "ValuePay", "NamePay", "statusaqayepardakht","select")['ValuePay'];
-$PaySettingpv = select("PaySetting", "ValuePay", "NamePay", "Cartstatuspv","select")['ValuePay'];
-$usernamecart = select("PaySetting", "ValuePay", "NamePay", "CartDirect","select")['ValuePay'];
-$Swapino = select("PaySetting", "ValuePay", "NamePay", "statusSwapWallet","select")['ValuePay'];
-$trnadoo = select("PaySetting", "ValuePay", "NamePay", "statustarnado","select")['ValuePay'];
-$paymentverify = select("PaySetting","ValuePay","NamePay","checkpaycartfirst","select")['ValuePay'];
+$PaySettingcard = getPaySettingValue("Cartstatus");
+$PaySettingnow = getPaySettingValue("nowpaymentstatus");
+$PaySettingaqayepardakht = getPaySettingValue("statusaqayepardakht");
+$PaySettingpv = getPaySettingValue("Cartstatuspv");
+$usernamecart = getPaySettingValue("CartDirect");
+$Swapino = getPaySettingValue("statusSwapWallet");
+$trnadoo = getPaySettingValue("statustarnado");
+$paymentverify = getPaySettingValue("checkpaycartfirst");
 $stmt = $pdo->prepare("SELECT * FROM Payment_report WHERE id_user = '$from_id' AND payment_Status = 'paid' ");
 $stmt->execute();
 $paymentexits = $stmt->rowCount();
-$zarinpal = select("PaySetting","ValuePay","NamePay","zarinpalstatus","select")['ValuePay'];
-$affilnecurrency = select("PaySetting","ValuePay","NamePay","digistatus","select")['ValuePay'];
-$arzireyali3= select("PaySetting","ValuePay","NamePay","statusiranpay3","select")['ValuePay'];
-$paymentstatussnotverify = select("PaySetting","ValuePay","NamePay","paymentstatussnotverify","select")['ValuePay'];
-$paymentsstartelegram = select("PaySetting","ValuePay","NamePay","statusstar","select")['ValuePay'];
-$payment_status_nowpayment = select("PaySetting","ValuePay","NamePay","statusnowpayment","select")['ValuePay'];
+$zarinpal = getPaySettingValue("zarinpalstatus");
+$zarinpey = getPaySettingValue("zarinpeystatus");
+$affilnecurrency = getPaySettingValue("digistatus");
+$arzireyali3 = getPaySettingValue("statusiranpay3");
+$paymentstatussnotverify = getPaySettingValue("paymentstatussnotverify");
+$paymentsstartelegram = getPaySettingValue("statusstar");
+$payment_status_nowpayment = getPaySettingValue("statusnowpayment");
 $step_payment = [
     'inline_keyboard' => []
     ];
@@ -338,6 +394,17 @@ $step_payment = [
         $step_payment['inline_keyboard'][] = [
             ['text' => $datatextbot['zarinpal'] , 'callback_data' => "zarinpal" ]
     ];
+    }
+    if($zarinpey == "onzarinpey"){
+        $zarinpeyLabel = trim($datatextbot['zarinpey'] ?? '');
+        if($zarinpeyLabel === ''){
+            $zarinpeyLabel = '🟠 زرین پی';
+        }
+        if($zarinpeyLabel !== ''){
+            $step_payment['inline_keyboard'][] = [
+                ['text' => $zarinpeyLabel , 'callback_data' => "zarinpey" ]
+        ];
+        }
     }
     if($paymentstatussnotverify == "onverifypay"){
         $step_payment['inline_keyboard'][] = [
@@ -622,50 +689,51 @@ $json_list_remove_helpـlink = json_encode($helpappremove);
     $stmt->execute();
     $list_marzban_panel_users = ['inline_keyboard' => []];
     $panelcount = select("marzban_panel","*","status","active","count");
-    if($panelcount > 10){
+    if ($panelcount > 10) {
         $temp_row = [];
-         while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        if ($result['hide_user'] != null && in_array($from_id, json_decode($result['hide_user'], true))) continue;
-        if($result['type'] == "Manualsale"){
-            $stmt = $pdo->prepare("SELECT * FROM manualsell WHERE codepanel = :codepanel AND status = 'active'");
-            $stmt->bindParam(':codepanel', $result['code_panel']);
-            $stmt->execute();
-            $configexits = $stmt->rowCount();
-            if(intval($configexits) == 0)continue;
+        while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if ($result['hide_user'] != null && in_array($from_id, json_decode($result['hide_user'], true))) continue;
+            if ($result['type'] == "Manualsale") {
+                $manualStmt = $pdo->prepare("SELECT * FROM manualsell WHERE codepanel = :codepanel AND status = 'active'");
+                $manualStmt->bindParam(':codepanel', $result['code_panel']);
+                $manualStmt->execute();
+                $configexits = $manualStmt->rowCount();
+                if (intval($configexits) == 0) continue;
+            }
+            if ($users['step'] == "getusernameinfo") {
+                $temp_row[] = ['text' => $result['name_panel'], 'callback_data' => "locationnotuser_{$result['code_panel']}"];
+            } else {
+                $temp_row[] = ['text' => $result['name_panel'], 'callback_data' => "location_{$result['code_panel']}"];
+            }
+            if (count($temp_row) == 2) {
+                $list_marzban_panel_users['inline_keyboard'][] = $temp_row;
+                $temp_row = [];
+            }
         }
-        if ($users['step'] == "getusernameinfo") {
-            $temp_row[] = ['text' => $result['name_panel'], 'callback_data' => "locationnotuser_{$result['code_panel']}"];
-        } else {
-            $temp_row[] = ['text' => $result['name_panel'], 'callback_data' => "location_{$result['code_panel']}"];
-        }
-         if (count($temp_row) == 2) {
-            $list_marzban_panel_users['inline_keyboard'][] = $temp_row;
-            $temp_row = []; 
-        }
-    } 
         if (!empty($temp_row)) {
-        $list_marzban_panel_users['inline_keyboard'][] = $temp_row;
-    }
-    }else{
-    while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        if($result['type'] == "Manualsale"){
-            $stmts = $pdo->prepare("SELECT * FROM manualsell WHERE codepanel = :codepanel AND status = 'active'");
-            $stmts->bindParam(':codepanel', $result['code_panel']);
-            $stmts->execute();
-            $configexits = $stmts->rowCount();
-            if(intval($configexits) == 0)continue;
+            $list_marzban_panel_users['inline_keyboard'][] = $temp_row;
         }
-        if($result['hide_user'] != null and in_array($from_id,json_decode($result['hide_user'],true)))continue;
-        if ($users['step'] == "getusernameinfo") {
-            $list_marzban_panel_users['inline_keyboard'][] = [
-                ['text' => $result['name_panel'], 'callback_data' => "locationnotuser_{$result['code_panel']}"]
-            ];
+    } else {
+        while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if ($result['type'] == "Manualsale") {
+                $stmts = $pdo->prepare("SELECT * FROM manualsell WHERE codepanel = :codepanel AND status = 'active'");
+                $stmts->bindParam(':codepanel', $result['code_panel']);
+                $stmts->execute();
+                $configexits = $stmts->rowCount();
+                if (intval($configexits) == 0) continue;
+            }
+            if ($result['hide_user'] != null && in_array($from_id, json_decode($result['hide_user'], true))) continue;
+            if ($users['step'] == "getusernameinfo") {
+                $list_marzban_panel_users['inline_keyboard'][] = [
+                    ['text' => $result['name_panel'], 'callback_data' => "locationnotuser_{$result['code_panel']}"]
+                ];
+            } else {
+                $list_marzban_panel_users['inline_keyboard'][] = [[
+                    'text' => $result['name_panel'],
+                    'callback_data' => "location_{$result['code_panel']}"
+                ]];
+            }
         }
-        else{
-            $list_marzban_panel_users['inline_keyboard'][] = [['text' => $result['name_panel'], 'callback_data' => "location_{$result['code_panel']}"]
-            ];
-        }
-    }
     }
 $statusnote = false; 
 if($setting['statusnamecustom'] == 'onnamecustom')$statusnote = true;
@@ -1342,35 +1410,46 @@ $stmt->execute();
 $result = $stmt->fetchAll();
 $table_exists = count($result) > 0;
 $departeman = [];
+
+$departemans = [
+    'keyboard' => [],
+    'resize_keyboard' => true,
+];
+
 if ($table_exists) {
     $stmt = $pdo->prepare("SELECT * FROM departman");
     $stmt->execute();
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         $departeman[] = [$row['name_departman']];
     }
-    $departemans = [
-        'keyboard' => [],
-        'resize_keyboard' => true,
-    ];
     foreach ($departeman as $button) {
         $departemans['keyboard'][] = [
             ['text' => $button[0]]
         ];
     }
-        $departemans['keyboard'][] = [
-        ['text' => $textbotlang['Admin']['backadmin']],
-        ['text' => $textbotlang['Admin']['backmenu']]
-    ];
-    $departemanslist = json_encode($departemans);
 }
+
+$departemans['keyboard'][] = [
+    ['text' => $textbotlang['Admin']['backadmin']],
+    ['text' => $textbotlang['Admin']['backmenu']]
+];
+
+$departemanslist = json_encode($departemans);
+
 // list departeman
-    $list_departman = ['inline_keyboard' => []];
- $stmt = $pdo->prepare("SELECT * FROM departman");
- $stmt->execute();
+$list_departman = ['inline_keyboard' => []];
+
+if ($table_exists) {
+    $stmt = $pdo->prepare("SELECT * FROM departman");
+    $stmt->execute();
     while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $list_departman['inline_keyboard'][] = [['text' => $result['name_departman'], 'callback_data' => "departman_{$result['id']}"]
-            ];
+        $list_departman['inline_keyboard'][] = [[
+            'text' => $result['name_departman'],
+            'callback_data' => "departman_{$result['id']}"
+        ]];
     }
+}
+
 $list_departman['inline_keyboard'][] = [
     ['text' => $textbotlang['users']['backbtn'], 'callback_data' => "backuser"],
 ];
@@ -1416,12 +1495,16 @@ function KeyboardProduct($location,$query,$pricediscount,$datakeyboard,$statuscu
             $valuetow = "";
         }
     while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $hide_panel = json_decode($result['hide_panel'],true);
-        if(in_array($location,$hide_panel))continue;
-        $stmts2 = $pdo->prepare("SELECT * FROM invoice WHERE Status != 'Unpaid' AND id_user = '$from_id'");
-        $stmts2->execute();
-        $countorder = $stmts2->rowCount();
-        if($result['one_buy_status'] == "1" && $countorder != 0 )continue;
+        $hide_panel = json_decode($result['hide_panel'], true);
+        if (!is_array($hide_panel)) {
+            if ($hide_panel === null && json_last_error() !== JSON_ERROR_NONE) {
+                error_log(sprintf('Invalid hide_panel JSON for product #%s: %s', $result['id'] ?? 'unknown', json_last_error_msg()));
+            }
+            $hide_panel = [];
+        }
+        // Products should always be shown in the selector; any single-purchase
+        // restriction should be enforced when the user attempts to buy instead
+        // of hiding the entry here.
         if(intval($pricediscount) != 0){
             $resultper = ($result['price_product'] * $pricediscount) / 100;
             $result['price_product'] = $result['price_product'] -$resultper;
@@ -1446,10 +1529,9 @@ function KeyboardCategory($location,$agent,$backuser = "backuser"){
     $stmt->execute();
     $list_category = ['inline_keyboard' => [],];
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $stmts = $pdo->prepare("SELECT * FROM product WHERE (Location = :location OR Location = '/all') AND category = :category AND agent = :agent");
+        $stmts = $pdo->prepare("SELECT * FROM product WHERE (Location = :location OR Location = '/all') AND category = :category");
         $stmts->bindParam(':location', $location, PDO::PARAM_STR);
         $stmts->bindParam(':category', $row['remark'], PDO::PARAM_STR);
-        $stmts->bindParam(':agent', $agent);
         $stmts->execute();
         if($stmts->rowCount() == 0)continue;
         $list_category['inline_keyboard'][] = [['text' =>$row['remark'],'callback_data' => "categorynames_".$row['id']]];
@@ -1462,7 +1544,7 @@ function KeyboardCategory($location,$agent,$backuser = "backuser"){
 
 function keyboardTimeCategory($name_panel,$agent,$callback_data = "producttime_",$callback_data_back = "backuser",$statuscustomvolume = false,$statusbtnextend = false){
     global $pdo,$textbotlang;
-    $stmt = $pdo->prepare("SELECT (Service_time) FROM product WHERE (Location = '$name_panel' OR Location = '/all') AND  agent = '$agent'");
+    $stmt = $pdo->prepare("SELECT Service_time FROM product WHERE (Location = '$name_panel' OR Location = '/all')");
     $stmt->execute();
     $montheproduct = array_flip(array_flip($stmt->fetchAll(PDO::FETCH_COLUMN)));
     $monthkeyboard = ['inline_keyboard' => []];
@@ -1600,27 +1682,51 @@ function keyboard_config($config_split,$id_invoice,$back_active = true){
         ['text' => "⚙️ کانفیگ", 'callback_data' => "none"],
         ['text' => "✏️نام کانفیگ", 'callback_data' => "none"],
         ];
-    for($i = 0; $i<count($config_split);$i++){
-        $config = $config_split[$i];
-        $split_config = explode("://",$config);
+    foreach (array_values($config_split) as $i => $config){
+        if(!is_string($config) || $config === ''){
+            error_log('Invalid configuration entry encountered while building keyboard');
+            continue;
+        }
+
+        $split_config = explode("://",$config,2);
+        if(count($split_config) !== 2){
+            error_log('Malformed configuration string: missing scheme separator');
+            continue;
+        }
+
         $type_prtocol = $split_config[0];
-        $split_config = $split_config[1];
-        if(isBase64($split_config)){
-            $split_config = base64_decode($split_config);
+        $payload = $split_config[1];
+        if(isBase64($payload)){
+            $decoded = base64_decode($payload, true);
+            if($decoded === false){
+                error_log('Failed to decode base64 configuration payload');
+                continue;
+            }
+            $payload = $decoded;
         }
+
+        $displayName = '';
         if($type_prtocol == "vmess"){
-            $split_config = json_decode($split_config,true)['ps'];
-        }elseif($type_prtocol == "ss"){
-            $split_config = $split_config;
-            $split_config = explode("#",$split_config)[1];
+            $configJson = json_decode($payload, true);
+            if(is_array($configJson) && isset($configJson['ps'])){
+                $displayName = $configJson['ps'];
+            }
         }else{
-        $split_config = explode("#",$split_config)[1];
+            $parts = explode("#",$payload,2);
+            if(count($parts) === 2){
+                $displayName = $parts[1];
+            }
         }
+
+        if($displayName === '' || $displayName === null){
+            $displayName = sprintf('Config %d', $i + 1);
+        }
+
         $keyboard_config['inline_keyboard'][] = [
-        ['text' => "دریافت کانفیگ", 'callback_data' => "configget_{$id_invoice}_$i"],
-        ['text' => urldecode($split_config), 'callback_data' => "none"],
+            ['text' => "دریافت کانفیگ", 'callback_data' => "configget_{$id_invoice}_$i"],
+            ['text' => urldecode($displayName), 'callback_data' => "none"],
         ];
-        
+
     }
     $keyboard_config['inline_keyboard'][] = [['text' => "⚙️ دریافت همه کانفیگ ها", 'callback_data' => "configget_$id_invoice"."_1520"]];
     if($back_active){
@@ -1652,6 +1758,9 @@ $keyboard_stat = json_encode([
                 ],
                 [
                     ['text' => "🗓 مشاهده آمار در تاریخ مشخص", 'callback_data' => 'view_stat_time'],
+                ],
+                [
+                    ['text' => "❌ بستن", 'callback_data' => 'close_stat'],
                 ]
             ]
         ]);

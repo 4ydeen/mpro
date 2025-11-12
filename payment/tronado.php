@@ -1,13 +1,13 @@
 <?php
 ini_set('error_log', 'error_log');
-require_once '../config.php';
-require_once '../jdf.php';
-require_once '../botapi.php';
-require_once '../Marzban.php';
-require_once '../function.php';
-require_once '../panels.php';
-require_once '../keyboard.php';
-require '../vendor/autoload.php';
+require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../jdf.php';
+require_once __DIR__ . '/../botapi.php';
+require_once __DIR__ . '/../Marzban.php';
+require_once __DIR__ . '/../function.php';
+require_once __DIR__ . '/../panels.php';
+require_once __DIR__ . '/../keyboard.php';
+require __DIR__ . '/../vendor/autoload.php';
 use Endroid\QrCode\Builder\Builder;
 use Endroid\QrCode\Encoding\Encoding;
 use Endroid\QrCode\ErrorCorrectionLevel;
@@ -17,8 +17,14 @@ use Endroid\QrCode\RoundBlockSizeMode;
 use Endroid\QrCode\Writer\PngWriter;
 
 $ManagePanel = new ManagePanel();
-$data = json_decode(file_get_contents("php://input"),true);
-$Payment_report = mysqli_fetch_assoc(mysqli_query($connect, "SELECT * FROM Payment_report WHERE id_order = '{$data['PaymentID']}' LIMIT 1"));
+$data = json_decode(file_get_contents("php://input"), true);
+$paymentId = $data['PaymentID'] ?? ($data['OrderId'] ?? ($data['Metadata']['PaymentID'] ?? null));
+if ($paymentId === null) {
+    error_log('Tronado callback received without payment identifier: ' . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    http_response_code(400);
+    exit('Missing payment identifier');
+}
+$Payment_report = mysqli_fetch_assoc(mysqli_query($connect, "SELECT * FROM Payment_report WHERE id_order = '{$paymentId}' LIMIT 1"));
 if($Payment_report['payment_Status'] == "expire")return;
 $setting = mysqli_fetch_assoc(mysqli_query($connect, "SELECT * FROM setting"));
 $price = $Payment_report['price'];
@@ -35,6 +41,7 @@ $datatextbot = array(
     'textaftertext' => '',
     'textmanual' => '',
     'textselectlocation' => '',
+    'text_wgdashboard' => '',
     'textafterpayibsng' => ''
 );
 foreach ($datatxtbot as $item) {
@@ -46,7 +53,7 @@ foreach ($datatxtbot as $item) {
         if($data['IsPaid']){
             echo "پرداخت با موفقیت انجام  شد";
     $textbotlang = languagechange('../text.json');
-    DirectPayment($data['PaymentID'],"../images.jpg");
+    DirectPayment($paymentId,"../images.jpg");
     $pricecashback = select("PaySetting", "ValuePay", "NamePay", "chashbackiranpay2","select")['ValuePay'];
     $Balance_id = mysqli_fetch_assoc(mysqli_query($connect, "SELECT * FROM user WHERE id = '{$Payment_report['id_user']}' LIMIT 1"));
     if($pricecashback != "0"){

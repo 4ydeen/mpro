@@ -4,8 +4,37 @@ require_once 'function.php';
 ini_set('error_log', 'error_log');
 
 
+function getWGPanelConfig($namepanel)
+{
+    $panelConfig = select("marzban_panel", "*", "name_panel", $namepanel, "select");
+    if (!is_array($panelConfig)) {
+        return [
+            'status' => false,
+            'msg' => 'Panel not found',
+        ];
+    }
+
+    foreach (["url_panel", "inboundid", "password_panel"] as $requiredKey) {
+        if (!array_key_exists($requiredKey, $panelConfig) || $panelConfig[$requiredKey] === null || $panelConfig[$requiredKey] === '') {
+            return [
+                'status' => false,
+                'msg' => 'Panel configuration missing ' . $requiredKey,
+            ];
+        }
+    }
+
+    return [
+        'status' => true,
+        'config' => $panelConfig,
+    ];
+}
+
 function get_userwg($username,$namepanel){
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
+    $panelResult = getWGPanelConfig($namepanel);
+    if (!$panelResult['status']) {
+        return $panelResult;
+    }
+    $marzban_list_get = $panelResult['config'];
     $curl = curl_init();
     curl_setopt_array($curl, array(
   CURLOPT_URL => $marzban_list_get['url_panel'].'/api/getWireguardConfigurationInfo?configurationName='.$marzban_list_get['inboundid'],
@@ -46,7 +75,11 @@ return $output;
 
 function ipslast($namepanel){
 
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
+    $panelResult = getWGPanelConfig($namepanel);
+    if (!$panelResult['status']) {
+        return $panelResult;
+    }
+    $marzban_list_get = $panelResult['config'];
     $url = $marzban_list_get['url_panel'].'/api/getAvailableIPs/'.$marzban_list_get['inboundid'];
     $headers = array(
         'Accept: application/json',
@@ -59,7 +92,11 @@ function ipslast($namepanel){
 }
 function downloadconfig($namepanel,$publickey){
 
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
+    $panelResult = getWGPanelConfig($namepanel);
+    if (!$panelResult['status']) {
+        return $panelResult;
+    }
+    $marzban_list_get = $panelResult['config'];
     $url = $marzban_list_get['url_panel']."/api/downloadPeer/{$marzban_list_get['inboundid']}?id=".urlencode($publickey);
     $headers = array(
         'Accept: application/json',
@@ -72,9 +109,16 @@ function downloadconfig($namepanel,$publickey){
 }
 function addpear($namepanel, $usernameac){
 
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
+    $panelResult = getWGPanelConfig($namepanel);
+    if (!$panelResult['status']) {
+        return $panelResult;
+    }
+    $marzban_list_get = $panelResult['config'];
     $pubandprivate = publickey();
     $ipconfig = ipslast($namepanel);
+    if (isset($ipconfig['status']) && $ipconfig['status'] === false && isset($ipconfig['msg'])) {
+        return $ipconfig;
+    }
     if(!empty($ipconfig['status']) && $ipconfig['status'] != 200){
         return array(
             'status' => false,
@@ -114,12 +158,16 @@ function addpear($namepanel, $usernameac){
     return $response;
 }
 function setjob($namepanel,$type,$value,$publickey){
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
+    $panelResult = getWGPanelConfig($namepanel);
+    if (!$panelResult['status']) {
+        return $panelResult;
+    }
+    $marzban_list_get = $panelResult['config'];
     $data = json_encode(array(
-	    "Job" => array(
-    		"JobID" =>  generateUUID(),
-    		"Configuration" => $marzban_list_get['inboundid'],
-    		"Peer" => $publickey,
+            "Job" => array(
+                "JobID" =>  generateUUID(),
+                "Configuration" => $marzban_list_get['inboundid'],
+                "Peer" => $publickey,
     		"Field" => $type,
     		"Operator" => "lgt",
     		"Value" => strval($value),
@@ -141,7 +189,11 @@ function setjob($namepanel,$type,$value,$publickey){
 }
 function updatepear($namepanel,array $config){
 
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
+    $panelResult = getWGPanelConfig($namepanel);
+    if (!$panelResult['status']) {
+        return $panelResult;
+    }
+    $marzban_list_get = $panelResult['config'];
     $configpanel = json_encode($config,true);
     $url = $marzban_list_get['url_panel'].'/api/updatePeerSettings/'.$marzban_list_get['inboundid'];
     $headers = array(
@@ -155,7 +207,11 @@ function updatepear($namepanel,array $config){
 }
 function deletejob($namepanel,array $config){
 
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
+    $panelResult = getWGPanelConfig($namepanel);
+    if (!$panelResult['status']) {
+        return $panelResult;
+    }
+    $marzban_list_get = $panelResult['config'];
     $configpanel = json_encode($config);
     $url = $marzban_list_get['url_panel'].'/api/deletePeerScheduleJob';
     $headers = array(
@@ -170,7 +226,11 @@ function deletejob($namepanel,array $config){
 }
 function ResetUserDataUsagewg($publickey, $namepanel){
 
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
+    $panelResult = getWGPanelConfig($namepanel);
+    if (!$panelResult['status']) {
+        return $panelResult;
+    }
+    $marzban_list_get = $panelResult['config'];
     $config = array(
     "id" => $publickey,
     "type" => "total"
@@ -189,8 +249,15 @@ function ResetUserDataUsagewg($publickey, $namepanel){
     return $response;
 }
 function remove_userwg($location,$username){
-    allowAccessPeers($location,$username);
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $panelResult = getWGPanelConfig($location);
+    if (!$panelResult['status']) {
+        return $panelResult;
+    }
+    $allowResponse = allowAccessPeers($location,$username);
+    if (isset($allowResponse['status']) && $allowResponse['status'] === false) {
+        return $allowResponse;
+    }
+    $marzban_list_get = $panelResult['config'];
     $data_user = json_decode(select("invoice","user_info","username",$username,"select")['user_info'],true)['public_key'];
     $url = $marzban_list_get['url_panel'].'/api/deletePeers/'.$marzban_list_get['inboundid'];
     $headers = array(
@@ -209,7 +276,11 @@ function remove_userwg($location,$username){
 }
 function allowAccessPeers($location,$username){
 
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $panelResult = getWGPanelConfig($location);
+    if (!$panelResult['status']) {
+        return $panelResult;
+    }
+    $marzban_list_get = $panelResult['config'];
     $data_user = json_decode(select("invoice","user_info","username",$username,"select")['user_info'],true)['public_key'];
     $url = $marzban_list_get['url_panel'].'/api/allowAccessPeers/'.$marzban_list_get['inboundid'];
     $headers = array(
@@ -228,7 +299,11 @@ function allowAccessPeers($location,$username){
 }
 function restrictPeers($location,$username){
 
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $panelResult = getWGPanelConfig($location);
+    if (!$panelResult['status']) {
+        return $panelResult;
+    }
+    $marzban_list_get = $panelResult['config'];
     $data_user = json_decode(select("invoice","user_info","username",$username,"select")['user_info'],true)['public_key'];
     $curl = curl_init();
     curl_setopt_array($curl, array(

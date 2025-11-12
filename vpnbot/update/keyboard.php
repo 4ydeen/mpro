@@ -75,7 +75,7 @@ $keyboardadmin = json_encode([
         ],
         [
             ['text' => "📞 تنظیم نام کاربری پشتیبانی"],
-            ['text' => "🆕 آپدیت ربات"],
+            ['text' => "📬 گزارش ربات"],
         ],
         [
             ['text' => "📣 جوین اجباری"]
@@ -180,7 +180,12 @@ function KeyboardProduct($location, $query, $pricediscount, $datakeyboard, $stat
         if (isset($productlist[$result['code_product']])) $result['price_product'] = $productlist[$result['code_product']];
         $result['name_product'] = empty($productlist_name[$result['code_product']]) ? $result['name_product'] : $productlist_name[$result['code_product']];
         $hide_panel = json_decode($result['hide_panel'], true);
-        if (in_array($location, $hide_panel)) continue;
+        if (!is_array($hide_panel)) {
+            if ($hide_panel === null && json_last_error() !== JSON_ERROR_NONE) {
+                error_log(sprintf('Invalid hide_panel JSON for product #%s: %s', $result['id'] ?? 'unknown', json_last_error_msg()));
+            }
+            $hide_panel = [];
+        }
         if (intval($pricediscount) != 0) {
             $resultper = ($result['price_product'] * $pricediscount) / 100;
             $result['price_product'] = $result['price_product'] - $resultper;
@@ -204,10 +209,9 @@ function KeyboardCategory($location, $agent, $backuser = "backuser")
     $stmt->execute();
     $list_category = ['inline_keyboard' => [],];
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $stmts = $pdo->prepare("SELECT * FROM product WHERE (Location = :location OR Location = '/all') AND category = :category AND agent = :agent");
+        $stmts = $pdo->prepare("SELECT * FROM product WHERE (Location = :location OR Location = '/all') AND category = :category");
         $stmts->bindParam(':location', $location, PDO::PARAM_STR);
         $stmts->bindParam(':category', $row['remark'], PDO::PARAM_STR);
-        $stmts->bindParam(':agent', $agent);
         $stmts->execute();
         if ($stmts->rowCount() == 0) continue;
         $list_category['inline_keyboard'][] = [['text' => $row['remark'], 'callback_data' => "categorynames_" . $row['id']]];

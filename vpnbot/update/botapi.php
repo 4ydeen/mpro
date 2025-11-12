@@ -27,10 +27,42 @@ function sendmessage($chat_id,$text,$keyboard,$parse_mode){
         
         ]);
 }
+function prepareTelegramInputFile($input)
+{
+    if ($input instanceof CURLFile) {
+        return $input;
+    }
+
+    if (is_string($input)) {
+        if (preg_match('/^https?:\/\//i', $input)) {
+            return $input;
+        }
+
+        $realPath = realpath($input);
+        if ($realPath !== false && is_file($realPath) && is_readable($realPath)) {
+            return new CURLFile($realPath);
+        }
+
+        error_log(sprintf('Telegram document path is not readable: %s', $input));
+        return null;
+    }
+
+    error_log('Unsupported Telegram input file type: ' . gettype($input));
+    return null;
+}
+
 function sendDocument($chat_id, $documentPath, $caption) {
-        telegram('sendDocument',[
+        $document = prepareTelegramInputFile($documentPath);
+        if ($document === null) {
+            return [
+                'ok' => false,
+                'description' => 'Document could not be prepared for Telegram upload.'
+            ];
+        }
+
+        return telegram('sendDocument',[
         'chat_id' => $chat_id,
-        'document' => new CURLFile($documentPath),
+        'document' => $document,
         'caption' => $caption,
         ]);
 }

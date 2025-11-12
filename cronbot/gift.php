@@ -2,12 +2,14 @@
 
 ini_set('error_log', 'error_log');
 date_default_timezone_set('Asia/Tehran');
-require_once '../config.php';
-require_once '../botapi.php';
-require_once '../panels.php';
-require_once '../function.php';
+require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../botapi.php';
+require_once __DIR__ . '/../panels.php';
+require_once __DIR__ . '/../function.php';
 $ManagePanel = new ManagePanel();
 
+$giftFile = __DIR__ . '/gift';
+$queueFile = __DIR__ . '/username.json';
 
 $setting = select("setting", "*");
 $errorreport = select("topicid","idreport","report","errorreport","select")['idreport'];
@@ -33,131 +35,177 @@ foreach ($datatxtbot as $item) {
         $datatextbot[$item['id_text']] = $item['text'];
     }
 }
-if(!is_file('gift'))return;
-if(!is_file('username.json'))return;
+if(!is_file($giftFile))return;
+if(!is_file($queueFile))return;
 
 
-$userid = json_decode(file_get_contents('username.json'));
-if(is_file('gift')){
-$info = json_decode(file_get_contents('gift'),true);
+$userid = json_decode(file_get_contents($queueFile));
+if(is_file($giftFile)){
+$info = json_decode(file_get_contents($giftFile),true);
 }
-$count = 0;
 if(count($userid) == 0){
     if(isset($info['id_admin'])){
     deletemessage($info['id_admin'], $info['id_message']);
     sendmessage($info['id_admin'], "📌 عملیات برای تمامی سرویس های درخواستی انجام شد.", null, 'HTML');
-    unlink('gift');
-    unlink('username.json');
+    unlink($giftFile);
+    unlink($queueFile);
     }
     return;
-    
+
 }
 
 if(!isset($info['typegift']))return;
-if($info['typegift'] == "volume"){
-    $count =  0;
-foreach ($userid as $iduser){
-    $count +=1;
-    if($count == 5)break;
-    $get_username_info = $ManagePanel->DataUser($info['name_panel'],$iduser->username);
-    unset($userid[0]);
-    $userid = array_values($userid);
-    if(!(empty($get_username_info['expire']) || empty($get_username_info['data_limit']) || $get_username_info['status'] == "Unsuccessful")){
-    $invoce = select("invoice","*","username",$iduser->username,"select");
-    $marzban_list_get = select("marzban_panel","*","name_panel",$info['name_panel'],"select");
-    $data_limit = $get_username_info['data_limit'] / pow(1024,3);
-    $data_limit_new = $data_limit + intval($info['value']);
-    $data_limit_byte = $data_limit_new *pow(1024,3);
-    $extra_volume = $ManagePanel->extra_volume($invoce['username'],$marzban_list_get['code_panel'],$info['value']);
-     if($extra_volume['status'] == false){
+
+$failedFile = __DIR__ . '/gift_failed.json';
+$failedUsers = [];
+if (is_file($failedFile)) {
+    $failedUsers = json_decode(file_get_contents($failedFile), true) ?: [];
+}
+
+$logFailedUser = function ($username) use (&$failedUsers, $failedFile) {
+    $failedUsers[] = $username;
+    $failedUsers = array_values(array_unique($failedUsers));
+    file_put_contents($failedFile, json_encode($failedUsers, JSON_UNESCAPED_UNICODE));
+};
+
+$batchSize = 5;
+$processed = 0;
+
+while (!empty($userid) && $processed < $batchSize) {
+    $iduser = array_shift($userid);
+    file_put_contents($queueFile, json_encode(array_values($userid), JSON_UNESCAPED_UNICODE));
+    if (!isset($iduser->username)) {
+        continue;
+    }
+
+    $processed++;
+    $get_username_info = $ManagePanel->DataUser($info['name_panel'], $iduser->username);
+
+    if (!is_array($get_username_info)) {
+        $logFailedUser($iduser->username);
+        continue;
+    }
+
+    if (($get_username_info['status'] ?? '') === 'Unsuccessful') {
+        $logFailedUser($iduser->username);
+        continue;
+    }
+
+    $hasExpire = array_key_exists('expire', $get_username_info) && $get_username_info['expire'] !== null && $get_username_info['expire'] !== '';
+    if (!$hasExpire) {
+        $logFailedUser($iduser->username);
+        continue;
+    }
+
+    $hasDataLimit = array_key_exists('data_limit', $get_username_info) && $get_username_info['data_limit'] !== null && $get_username_info['data_limit'] !== '';
+    if (!$hasDataLimit) {
+        $logFailedUser($iduser->username);
+        continue;
+    }
+
+    $hadPersistentError = false;
+
+    $invoce = select("invoice", "*", "username", $iduser->username, "select");
+    if (!is_array($invoce) || !isset($invoce['id_user']) || empty($invoce['id_user'])) {
+        $logFailedUser($iduser->username);
+        continue;
+    }
+    $marzban_list_get = select("marzban_panel", "*", "name_panel", $info['name_panel'], "select");
+
+    if ($info['typegift'] == "volume") {
+        $extra_volume = $ManagePanel->extra_volume($invoce['username'], $marzban_list_get['code_panel'], $info['value']);
+        if ($extra_volume['status'] == false) {
+            $hadPersistentError = true;
             $extra_volume['msg'] = json_encode($extra_volume['msg']);
-            $textreports = "خطای اضافه شدن هدیه حجم
-نام پنل : {$marzban_list_get['name_panel']}
-نام کاربری سرویس : {$nameloc['username']}
-دلیل خطا : {$extra_volume['msg']}";
+            $textreports = "خطای اضافه شدن هدیه حجم\nنام پنل : {$marzban_list_get['name_panel']}\nنام کاربری سرویس : {$iduser->username}\nدلیل خطا : {$extra_volume['msg']}";
             if (strlen($setting['Channel_Report']) > 0) {
-                telegram('sendmessage',[
+                telegram('sendmessage', [
                     'chat_id' => $setting['Channel_Report'],
                     'message_thread_id' => $errorreport,
                     'text' => $textreports,
                     'parse_mode' => "HTML"
                 ]);
             }
-        }else{
-sendmessage($invoce['id_user'],$info['text'],null,"html");
-}
-$data_for_database = json_encode(array(
-        'volume_value' => $info['value'],
-        'old_volume' => $get_username_info['data_limit'],
-        'expire_old' => $get_username_info['expire']
-    ));
-$volumepricelast = 0;
-$stmt = $pdo->prepare("INSERT IGNORE INTO service_other (id_user, username, value, type, time, price, output) VALUES (:id_user, :username, :value, :type, :time, :price, :output)");
-    $value = $data_for_database;
-    $dateacc = date('Y/m/d H:i:s');
-    $type = "gift_volume";
-    $stmt->execute([
-    ':id_user' => $iduser->username,
-    ':username' => $invoce['username'],
-    ':value' => $value,
-    ':type' => $type,
-    ':time' => $dateacc,
-    ':price' => $volumepricelast,
-    ':output' => json_encode($extra_volume),
-    ]);
-}
-}
-}
-else{
-    
-$count =  0;
-foreach ($userid as $iduser){
-    $count +=1;
-    if($count == 5)break;
-    $get_username_info = $ManagePanel->DataUser($info['name_panel'],$iduser->username);
-    unset($userid[0]);
-    $userid = array_values($userid);
-    if(!(empty($get_username_info['expire']) || $get_username_info['status'] == "Unsuccessful")){
-    $invoce = select("invoice","*","username",$iduser->username,"select");
-    $marzban_list_get = select("marzban_panel","*","name_panel",$info['name_panel'],"select");
-    $extra_time = $ManagePanel->extra_time($get_username_info['username'],$marzban_list_get['code_panel'],intval($info['value']));
-     if($extra_time['status'] == false){
-            $extra_time['msg'] = json_encode($extra_time['msg']);
-            $textreports = "خطای اضافه شدن هدیه حجم
-نام پنل : {$marzban_list_get['name_panel']}
-نام کاربری سرویس : {$nameloc['username']}
-دلیل خطا : {$extra_time['msg']}";
-            if (strlen($setting['Channel_Report']) > 0) {
-                telegram('sendmessage',[
-                    'chat_id' => $setting['Channel_Report'],
-                    'message_thread_id' => $errorreport,
-                    'text' => $textreports,
-                    'parse_mode' => "HTML"
-                ]);
-            }
-        }else{
-            sendmessage($invoce['id_user'],$info['text'],null,"html");
+        } else {
+            sendmessage($invoce['id_user'], $info['text'], null, "html");
         }
-$data_for_database = json_encode(array(
-        'time_value' => $info['value'],
-        'old_volume' => $get_username_info['data_limit'],
-        'expire_old' => $get_username_info['expire']
-    ));
-$volumepricelast = 0;
-$stmt = $pdo->prepare("INSERT IGNORE INTO service_other (id_user, username, value, type, time, price, output) VALUES (:id_user, :username, :value, :type, :time, :price, :output)");
-    $value = $data_for_database;
-    $dateacc = date('Y/m/d H:i:s');
-    $type = "gift_time";
-    $stmt->execute([
-    ':id_user' => $invoce['id_user'],
-    ':username' => $invoce['username'],
-    ':value' => $value,
-    ':type' => $type,
-    ':time' => $dateacc,
-    ':price' => $volumepricelast,
-    ':output' => json_encode($extra_time),
-    ]);
+
+        $data_for_database = json_encode(array(
+            'volume_value' => $info['value'],
+            'old_volume' => $get_username_info['data_limit'],
+            'expire_old' => $get_username_info['expire']
+        ));
+        $volumepricelast = 0;
+        $stmt = $pdo->prepare("INSERT IGNORE INTO service_other (id_user, username, value, type, time, price, output) VALUES (:id_user, :username, :value, :type, :time, :price, :output)");
+        $value = $data_for_database;
+        $dateacc = date('Y/m/d H:i:s');
+        $type = "gift_volume";
+        $stmt->execute([
+            ':id_user' => $invoce['id_user'],
+            ':username' => $invoce['username'],
+            ':value' => $value,
+            ':type' => $type,
+            ':time' => $dateacc,
+            ':price' => $volumepricelast,
+            ':output' => json_encode($extra_volume)
+        ]);
+    } else {
+        $extra_time = $ManagePanel->extra_time($get_username_info['username'], $marzban_list_get['code_panel'], intval($info['value']));
+        if ($extra_time['status'] == false) {
+            $hadPersistentError = true;
+            $extra_time['msg'] = json_encode($extra_time['msg']);
+            $textreports = "خطای اضافه شدن هدیه حجم\nنام پنل : {$marzban_list_get['name_panel']}\nنام کاربری سرویس : {$iduser->username}\nدلیل خطا : {$extra_time['msg']}";
+            if (strlen($setting['Channel_Report']) > 0) {
+                telegram('sendmessage', [
+                    'chat_id' => $setting['Channel_Report'],
+                    'message_thread_id' => $errorreport,
+                    'text' => $textreports,
+                    'parse_mode' => "HTML"
+                ]);
+            }
+        } else {
+            sendmessage($invoce['id_user'], $info['text'], null, "html");
+        }
+
+        $data_for_database = json_encode(array(
+            'time_value' => $info['value'],
+            'old_volume' => $get_username_info['data_limit'],
+            'expire_old' => $get_username_info['expire']
+        ));
+        $volumepricelast = 0;
+        $stmt = $pdo->prepare("INSERT IGNORE INTO service_other (id_user, username, value, type, time, price, output) VALUES (:id_user, :username, :value, :type, :time, :price, :output)");
+        $value = $data_for_database;
+        $dateacc = date('Y/m/d H:i:s');
+        $type = "gift_time";
+        $stmt->execute([
+            ':id_user' => $invoce['id_user'],
+            ':username' => $invoce['username'],
+            ':value' => $value,
+            ':type' => $type,
+            ':time' => $dateacc,
+            ':price' => $volumepricelast,
+            ':output' => json_encode($extra_time)
+        ]);
+    }
+
+    if ($hadPersistentError) {
+        $logFailedUser($iduser->username);
+    }
 }
+
+if (empty($userid)) {
+    if(isset($info['id_admin'])){
+    deletemessage($info['id_admin'], $info['id_message']);
+    $successText = "📌 عملیات برای تمامی سرویس های درخواستی انجام شد.";
+    if (!empty($failedUsers)) {
+        $failedList = implode("\n", $failedUsers);
+        $successText .= "\n⚠️ کاربران با خطای اعمال هدیه:\n" . $failedList;
+    }
+    sendmessage($info['id_admin'], $successText, null, 'HTML');
+    unlink($giftFile);
+    unlink($queueFile);
+    if (empty($failedUsers) && is_file($failedFile)) {
+        unlink($failedFile);
+    }
+    }
 }
-}
-file_put_contents('username.json',json_encode($userid,true));

@@ -7,7 +7,7 @@ ini_set('max_execution_time', '600');
 $rootPath = filter_input(INPUT_SERVER, 'DOCUMENT_ROOT');
 $PHP_SELF = filter_input(INPUT_SERVER, 'PHP_SELF');
 $Pathfile = dirname(dirname($PHP_SELF, 2));
-$Pathfiles = $rootPath . $Pathfile;
+$Pathfiles = rtrim($rootPath . $Pathfile, '/\\') . '/';
 require_once 'config.php';
 require_once $Pathfiles . 'function.php';
 require_once $Pathfiles . 'config.php';
@@ -23,7 +23,7 @@ $text_bot_var = json_decode(file_get_contents('text.json'), true);
 if (!checktelegramip())
     die("Unauthorized access");
 
-$textbotlang = json_decode(file_get_contents($Pathfiles . '/text.json'), true)['fa'];
+$textbotlang = json_decode(file_get_contents($Pathfiles . 'text.json'), true)['fa'];
 $dataBase = select("botsaz", "*", "bot_token", $ApiToken, "select");
 $admin_ids = json_decode($dataBase['admin_ids']);
 $setting = json_decode($dataBase['setting'], true);
@@ -83,7 +83,12 @@ if ($from_id != 0) {
         ));
         file_put_contents("data/$from_id/$from_id.json", $data_user);
     }
-    $stmt = $pdo->prepare("INSERT IGNORE INTO user (id , step,limit_usertest,User_Status,number,Balance,pagenumber,username,agent,message_count,last_message_time,affiliates,affiliatescount,cardpayment,number_username,namecustom,register,verify,codeInvitation,pricediscount,maxbuyagent,joinchannel,score,bottype,status_cron) VALUES (:from_id, 'none',:limit_usertest_all,'Active','none','0','1',:username,'f','0','0','0','0',:showcard,'100','none',:date,:verifycode,:codeInvitation,'0','0','0','0',:bottype,'1')");
+    $initialProcessingValue = '0';
+    $initialProcessingValueOne = 'none';
+    $initialProcessingValueTow = 'none';
+    $initialProcessingValueFour = '0';
+    $initialRollStatus = '0';
+    $stmt = $pdo->prepare("INSERT IGNORE INTO user (id , step,limit_usertest,User_Status,number,Balance,pagenumber,username,agent,message_count,last_message_time,affiliates,affiliatescount,cardpayment,number_username,namecustom,register,verify,codeInvitation,pricediscount,maxbuyagent,joinchannel,score,bottype,status_cron,roll_Status,Processing_value,Processing_value_one,Processing_value_tow,Processing_value_four) VALUES (:from_id, 'none',:limit_usertest_all,'Active','none','0','1',:username,'f','0','0','0','0',:showcard,'100','none',:date,:verifycode,:codeInvitation,'0','0','0','0',:bottype,'1',:roll_status,:processing_value,:processing_value_one,:processing_value_tow,:processing_value_four)");
     $stmt->bindParam(':bottype', $ApiToken);
     $stmt->bindParam(':from_id', $from_id);
     $stmt->bindParam(':limit_usertest_all', $settingmain['limit_usertest_all']);
@@ -92,6 +97,11 @@ if ($from_id != 0) {
     $stmt->bindParam(':date', $date);
     $stmt->bindParam(':verifycode', $valueverify);
     $stmt->bindParam(':codeInvitation', $randomString);
+    $stmt->bindParam(':roll_status', $initialRollStatus);
+    $stmt->bindParam(':processing_value', $initialProcessingValue);
+    $stmt->bindParam(':processing_value_one', $initialProcessingValueOne);
+    $stmt->bindParam(':processing_value_tow', $initialProcessingValueTow);
+    $stmt->bindParam(':processing_value_four', $initialProcessingValueFour);
     $stmt->execute();
 }
 $user = select("user", "*", "id", $from_id, "select");
@@ -443,7 +453,7 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
     $stmt->execute();
     $stmt->close();
     $dataoutput = $ManagePanel->createUser($marzban_list_get['name_panel'], "usertest", $username_ac, $datac);
-    if ($dataoutput['username'] == null) {
+    if (empty($dataoutput['username'])) {
         $dataoutput['msg'] = json_encode($dataoutput['msg']);
         sendmessage($from_id, $textbotlang['users']['usertest']['errorcreat'], $keyboard, 'html');
         $texterros = "
@@ -483,8 +493,7 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
 ⏳ مدت زمان: {day}  ساعت
 🗜 حجم سرویس:  {volume} مگابایت
 
-لینک اتصال:
-{config}";
+{connection_links}";
     if ($marzban_list_get['type'] == "WGDashboard") {
         $datatextbot['textaftertext'] = "✅ سرویس با موفقیت ایجاد شد
 
@@ -504,7 +513,17 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
     $textcreatuser = str_replace('{location}', $marzban_list_get['name_panel'], $textcreatuser);
     $textcreatuser = str_replace('{day}', $marzban_list_get['time_usertest'], $textcreatuser);
     $textcreatuser = str_replace('{volume}', $marzban_list_get['val_usertest'], $textcreatuser);
-    $textcreatuser = str_replace('{config}', "<code>{$config}{$output_config_link}</code>", $textcreatuser);
+    $trimmedSubscription = trim($output_config_link);
+    $trimmedConfigList = trim($config);
+    $connectionSections = [];
+    if ($trimmedSubscription !== '') {
+        $connectionSections[] = "لینک اتصال:\n<code>{$trimmedSubscription}</code>";
+    }
+    if ($trimmedConfigList !== '') {
+        $connectionSections[] = "لینک اشتراک :\n<code>{$trimmedConfigList}</code>";
+    }
+    $connectionLinksBlock = implode("\n\n", $connectionSections);
+    $textcreatuser = str_replace('{connection_links}', $connectionLinksBlock, $textcreatuser);
     if ($marzban_list_get['type'] == "ibsng" || $marzban_list_get['type'] == "ibsng") {
         $textcreatuser = str_replace('{password}', $dataoutput['subscription_url'], $textcreatuser);
         update("invoice", "user_info", $dataoutput['subscription_url'], "id_invoice", $randomString);
@@ -513,7 +532,9 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
         $urlimage = "$from_id$randomString.png";
         $qrCode = createqrcode($output_config_link);
         file_put_contents($urlimage, $qrCode->getString());
-        addBackgroundImage($urlimage, $qrCode, $Pathfiles . 'images.jpg');
+        if (!addBackgroundImage($urlimage, $qrCode, $Pathfiles . 'images.jpg')) {
+            error_log("Unable to apply background image for QR code using path '{$Pathfiles}images.jpg'");
+        }
         telegram('sendphoto', [
             'chat_id' => $from_id,
             'photo' => new CURLFile($urlimage),
@@ -532,7 +553,9 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
             $urlimage = "$from_id$randomString.png";
             $qrCode = createqrcode($config);
             file_put_contents($urlimage, $qrCode->getString());
-            addBackgroundImage($urlimage, $qrCode, $Pathfiles . 'images.jpg');
+            if (!addBackgroundImage($urlimage, $qrCode, $Pathfiles . 'images.jpg')) {
+                error_log("Unable to apply background image for QR code using path '{$Pathfiles}images.jpg'");
+            }
             telegram('sendphoto', [
                 'chat_id' => $from_id,
                 'photo' => new CURLFile($urlimage),
@@ -583,7 +606,7 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
     step("statusnamecustom", $from_id);
     return;
 } elseif ($text == $text_bot_var['btn_keyboard']['buy'] || $user['step'] == "statusnamecustom") {
-    $locationproduct = mysqli_query($connect, "SELECT * FROM marzban_panel  WHERE status = 'active' AND (agent = '{$userbot['agent']}' OR agent = 'all')");
+    $locationproduct = mysqli_query($connect, "SELECT * FROM marzban_panel  WHERE status = 'active'");
     if (mysqli_num_rows($locationproduct) == 0) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['nullpanel'], null, 'HTML');
         return;
@@ -591,7 +614,7 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
     if (mysqli_num_rows($locationproduct) == 1) {
         $location = mysqli_fetch_assoc($locationproduct)['name_panel'];
         $locationproduct = select("marzban_panel", "*", "name_panel", $location, "select");
-        $query = "SELECT * FROM product WHERE (Location = '{$locationproduct['name_panel']}' OR Location = '/all')AND agent= '{$userbot['agent']}'";
+        $query = "SELECT * FROM product WHERE (Location = '{$locationproduct['name_panel']}' OR Location = '/all')";
         $stmt = $pdo->prepare($query);
         $stmt->execute();
         $productnotexits = $stmt->rowCount();
@@ -694,7 +717,7 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
             return;
         }
     }
-    $query = "SELECT * FROM product WHERE (Location = '{$locationproduct['name_panel']}' OR Location = '/all')AND agent= '{$userbot['agent']}'";
+    $query = "SELECT * FROM product WHERE (Location = '{$locationproduct['name_panel']}' OR Location = '/all')";
     $stmt = $pdo->prepare($query);
     $stmt->execute();
     $productnotexits = $stmt->rowCount();
@@ -741,7 +764,7 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
     $categorynames = select("category", "remark", "id", $categorynames, "select")['remark'];
     $userdate = json_decode($user['Processing_value'], true);
     $locationproduct = select("marzban_panel", "*", "name_panel", $userdate['name_panel'], "seelct");
-    $query = "SELECT * FROM product WHERE (Location = '{$locationproduct['name_panel']}' OR Location = '/all') AND category = '$categorynames' AND agent= '{$userbot['agent']}' ";
+    $query = "SELECT * FROM product WHERE (Location = '{$locationproduct['name_panel']}' OR Location = '/all') AND category = '$categorynames' ";
     $statuscustomvolume = json_decode($locationproduct['customvolume'], true)[$userbot['agent']];
     if ($statuscustomvolume == "1" && $locationproduct['type'] != "Manualsale") {
         $statuscustom = true;
@@ -846,7 +869,17 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
             $code_product = $userdate['code_product'];
         }
     } else {
-        $code_product = $dataget[1];
+        if (isset($dataget[1])) {
+            $code_product = $dataget[1];
+        } else {
+            $code_product = $userdate['code_product'] ?? null;
+        }
+    }
+    $needsProductCode = !in_array($user['step'], ['endstepuserscustom', 'getvolumecustomuser'], true);
+    if ($needsProductCode && ($code_product === null || $code_product === '')) {
+        sendmessage($from_id, "❌ خطایی در هنگام خرید رخ داده لطفا مراحل را از اول طی کنید", $keyboard, 'html');
+        step("home", $from_id);
+        return;
     }
     if (!in_array($user['step'], ["endstepuserscustom", "getvolumecustomuser"])) {
         $product = select("product", "*", "code_product", $code_product);
@@ -856,7 +889,7 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
             return;
         }
         savedata("save", "code_product", $code_product);
-        $productlist = json_decode(file_get_contents('product.json'), true);
+        $productlist = readJsonFileIfExists('product.json');
         if (isset($productlist[$product['code_product']])) {
             $product['price_product'] = $productlist[$product['code_product']];
         }
@@ -941,7 +974,7 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
         $product = $userdate['code_product'];
         $product = select("product", "*", "code_product", $product);
         $priceBot = $product['price_product'];
-        $productlist = json_decode(file_get_contents('product.json'), true);
+        $productlist = readJsonFileIfExists('product.json');
         if (isset($productlist[$product['code_product']])) {
             $product['price_product'] = $productlist[$product['code_product']];
         }
@@ -1048,7 +1081,7 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
         'type' => 'buy_agent_user_bot'
     );
     $dataoutput = $ManagePanel->createUser($marzban_list_get['name_panel'], $datafactor['code_product'], $username_ac, $datac);
-    if ($dataoutput['username'] == null) {
+    if (empty($dataoutput['username'])) {
         $dataoutput['msg'] = json_encode($dataoutput['msg']);
         sendmessage($from_id, $textbotlang['users']['sell']['ErrorConfig'], $keyboard, 'HTML');
         $texterros = "⭕️ خطای ساخت اشتراک  در ربات نماینده
@@ -1094,9 +1127,7 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
 ⏳ مدت زمان: {day}  روز
 🗜 حجم سرویس:  {volume} گیگابایت
 
-لینک اتصال:
-{config}
-{links}
+{connection_links}
 ";
     $textmanual = "✅ سرویس با موفقیت ایجاد شد
 
@@ -1105,7 +1136,7 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
 🇺🇳 لوکیشن: {location}
 
  اطلاعات سرویس :
-{config}
+{connection_links}
 ";
     if ($marzban_list_get['type'] == "ibsng") {
         $datatextbot['textafterpay'] = $datatextbot['textafterpayibsng'];
@@ -1133,8 +1164,17 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
     $textcreatuser = str_replace('{location}', $marzban_list_get['name_panel'], $textcreatuser);
     $textcreatuser = str_replace('{day}', $datafactor['Service_time'], $textcreatuser);
     $textcreatuser = str_replace('{volume}', $datafactor['Volume_constraint'], $textcreatuser);
-    $textcreatuser = str_replace('{config}', "<code>{$output_config_link}</code>", $textcreatuser);
-    $textcreatuser = str_replace('{links}', "<code>{$config}</code>", $textcreatuser);
+    $trimmedSubscription = trim($output_config_link);
+    $trimmedConfigList = trim($config);
+    $connectionSections = [];
+    if ($trimmedSubscription !== '') {
+        $connectionSections[] = "لینک اتصال:\n<code>{$trimmedSubscription}</code>";
+    }
+    if ($trimmedConfigList !== '') {
+        $connectionSections[] = "لینک اشتراک :\n<code>{$trimmedConfigList}</code>";
+    }
+    $connectionLinksBlock = implode("\n\n", $connectionSections);
+    $textcreatuser = str_replace('{connection_links}', $connectionLinksBlock, $textcreatuser);
     if (intval($datafactor['Volume_constraint']) == 0) {
         $textcreatuser = str_replace('گیگابایت', "", $textcreatuser);
     }
@@ -1154,7 +1194,9 @@ if ($text == $text_bot_var['btn_keyboard']['buy'] && $setting['active_step_note'
             $urlimage = "$from_id$randomString.png";
             $qrCode = createqrcode($output_config_link);
             file_put_contents($urlimage, $qrCode->getString());
-            addBackgroundImage($urlimage, $qrCode, $Pathfiles . 'images.jpg');
+            if (!addBackgroundImage($urlimage, $qrCode, $Pathfiles . 'images.jpg')) {
+                error_log("Unable to apply background image for QR code using path '{$Pathfiles}images.jpg'");
+            }
             telegram('sendphoto', [
                 'chat_id' => $from_id,
                 'photo' => new CURLFile($urlimage),
@@ -1261,6 +1303,10 @@ $textonebuy
     step("getresidcart", $from_id);
     savedata("clear", "id_order", $randomString);
 } elseif ($user['step'] == "getresidcart") {
+    if (empty($photo)) {
+        sendmessage($from_id, "❌ لطفاً فقط تصویر رسید را ارسال کنید.", null, 'HTML');
+        return;
+    }
     $userdate = json_decode($user['Processing_value'], true);
     $PaymentReport = select("Payment_report", '*', "id_order", $userdate['id_order'], "select");
     $Confirm_pay = json_encode([
@@ -1445,13 +1491,29 @@ $textonebuy
         return;
     }
     $output = "";
-    $config = "";
+    $configLinks = [];
     if ($marzban['sublink'] == "onsublink") {
         $output = $DataUserOut['subscription_url'];
     }
-    if ($marzban['config'] == "onconfig") {
-        $config = $DataUserOut['links'][0];
+    if ($marzban['config'] == "onconfig" && isset($DataUserOut['links']) && is_array($DataUserOut['links'])) {
+        foreach ($DataUserOut['links'] as $link) {
+            $trimmedLink = trim($link);
+            if ($trimmedLink !== '') {
+                $configLinks[] = $trimmedLink;
+            }
+        }
     }
+    $config = implode("\n", $configLinks);
+    $trimmedSubscription = trim($output);
+    $trimmedConfigList = trim($config);
+    $connectionSections = [];
+    if ($trimmedSubscription !== '') {
+        $connectionSections[] = "لینک اتصال:\n<code>{$trimmedSubscription}</code>";
+    }
+    if ($trimmedConfigList !== '') {
+        $connectionSections[] = "لینک اشتراک :\n<code>{$trimmedConfigList}</code>";
+    }
+    $connectionLinksBlock = implode("\n\n", $connectionSections);
     #-----------------------------#
     $keyboardsetting = json_encode($keyboardsetting);
     if (!in_array($status, ["active", "on_hold", "disabled", "Unknown"])) {
@@ -1466,14 +1528,10 @@ $textonebuy
 📥 حجم مصرفی : $usedTrafficGb
 💢 حجم باقی مانده : $RemainingVolume ($Percent%)
 
-📅 فعال تا تاریخ : $expirationDate ($day) 
+📅 فعال تا تاریخ : $expirationDate ($day)
 
 
-لینک اتصال : 
-    
-<code>$config</code>
-
-<code>$output</code>
+{$connectionLinksBlock}
 ";
     } else {
         if ($DataUserOut['sub_updated_at'] !== null) {
@@ -1482,7 +1540,7 @@ $textonebuy
 🌍 موقعیت سرویس :{$nameloc['Service_location']}
 🖇 کد سرویس:{$nameloc['id_invoice']}
 
-        
+
 🔋 حجم سرویس : $LastTraffic
 📥 حجم مصرفی : $usedTrafficGb
 💢 حجم باقی مانده : $RemainingVolume ($Percent%)
@@ -1494,10 +1552,7 @@ $textonebuy
 🔄 اخرین زمان آپدیت لینک اشتراک  : $lastupdate
 #️⃣ کلاینت متصل شده :<code>{$DataUserOut['sub_last_user_agent']}</code>
 
-لینک اتصال : 
-    
-$config
-$output
+{$connectionLinksBlock}
 ";
         } else {
             $textinfo = "وضعیت سرویس : $status_var
@@ -1512,13 +1567,9 @@ $output
 📅 فعال تا تاریخ : $expirationDate ($day)
 
 📶 اخرین زمان اتصال شما : $lastonline
-        
 
-لینک اتصال : 
-    
-<code>$config</code>
 
-<code>$output</code>
+{$connectionLinksBlock}
 ";
         }
     }
@@ -1548,7 +1599,7 @@ $output
     savedata("save", "name_panel", $nameloc['Service_location']);
     deletemessage($from_id, $message_id);
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select");
-    $query = "SELECT * FROM product WHERE (Location = '{$nameloc['Service_location']}' OR Location = '/all')AND agent= '{$userbot['agent']}'";
+    $query = "SELECT * FROM product WHERE (Location = '{$nameloc['Service_location']}' OR Location = '/all')";
     $stmt = $pdo->prepare($query);
     $stmt->execute();
     $productnotexits = $stmt->rowCount();
@@ -1559,7 +1610,7 @@ $output
         } else {
             $statuscustom = false;
         }
-        $query = "SELECT * FROM product WHERE (Location = '{$marzban_list_get['name_panel']}' OR Location = '/all')AND agent= '{$userbot['agent']}'";
+        $query = "SELECT * FROM product WHERE (Location = '{$marzban_list_get['name_panel']}' OR Location = '/all')";
         $prodcut = KeyboardProduct($marzban_list_get['name_panel'], $query, 0, "selectproductextends_", $statuscustom, "backuser", null, $customvolume = "customvolumeextend");
         sendmessage($from_id, "🛍️ لطفاً سرویسی که می‌خواهید تمدید کنید را انتخاب کنید!", $prodcut, 'HTML');
     } else {
@@ -1649,7 +1700,7 @@ $output
         $product = $dataget[1];
         savedata("save", "code_product", $product);
         $product = select("product", "*", "code_product", $product);
-        $productlist = json_decode(file_get_contents('product.json'), true);
+        $productlist = readJsonFileIfExists('product.json');
         if (isset($productlist[$product['code_product']])) {
             $product['price_product'] = $productlist[$product['code_product']];
         }
@@ -1697,7 +1748,7 @@ $output
     if (isset($userdate['code_product'])) {
         $product = $userdate['code_product'];
         $product = select("product", "*", "code_product", $product);
-        $productlist = json_decode(file_get_contents('product.json'), true);
+        $productlist = readJsonFileIfExists('product.json');
         $priceproductmain = $product['price_product'];
         if (isset($productlist[$product['code_product']])) {
             $product['price_product'] = $productlist[$product['code_product']];
@@ -1725,7 +1776,7 @@ $output
             "data_limit_reset" => "no_reset"
         );
     }
-    $productlist_name = json_decode(file_get_contents('product_name.json'), true);
+    $productlist_name = readJsonFileIfExists('product_name.json');
     $datafactor['name_product'] = empty($productlist_name[$datafactor['code_product']]) ? $datafactor['name_product'] : $productlist_name[$datafactor['code_product']];
     $botbalance = select("botsaz", "*", "bot_token", $ApiToken, "select");
     $userbotbalance = select("user", "*", "id", $botbalance['id_user'], "select");

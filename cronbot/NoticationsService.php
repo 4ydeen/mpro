@@ -2,10 +2,10 @@
 ini_set('error_log', 'error_log');
 date_default_timezone_set('Asia/Tehran');
 
-require_once '../config.php';
-require_once '../botapi.php';
-require_once '../panels.php';
-require_once '../function.php';
+require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../botapi.php';
+require_once __DIR__ . '/../panels.php';
+require_once __DIR__ . '/../function.php';
 
 class ServiceMonitor
 {
@@ -105,7 +105,8 @@ class ServiceMonitor
                 "نام کاربری سرویس :‌ <code>{$username}</code>\n" .
                 "وضعیت سرویس : {$userData['status']}\n" .
                 "حجم باقی مانده : {$formattedVolume}";
-            $this->send_notifactions($invoice, $user, $message, true, $invoice['bottype']);
+            $shouldNotify = !empty($user['status_cron'] ?? null);
+            $this->send_notifactions($invoice, $shouldNotify, $message, true, $invoice['bottype']);
             $this->sendReportNotification($reportMessage);
             $this->updateInvoiceStatus("volume", $invoice);
             return true;
@@ -132,7 +133,8 @@ class ServiceMonitor
             $this->Panel->RemoveUser($invoice['Service_location'], $username);
             $message = "📌 کاربر گرامی بدلیل عدم تمدید، سرویس {$invoice['username']} از لیست سرویس های شما حذف گردید\n\n🌟 جهت تهیه سرویس جدید از بخش خرید سرویس اقدام فرمایید";
             $reportMessage = "📌 اطلاعیه کرون حذف\n\nنام کاربری سرویس :‌ <code>{$invoice['username']}</code>\nوضعیت سرویس : $statusText\nتعداد روز باقی مانده ‌:‌$daysRemaining\nحجم باقی مانده : $remainingVolume";
-            $this->send_notifactions($invoice, $user, $message, false,$invoice['bottype']);
+            $shouldNotify = !empty($user['status_cron'] ?? null);
+            $this->send_notifactions($invoice, $shouldNotify, $message, false, $invoice['bottype']);
             $this->sendReportNotification($reportMessage);
         }
     }
@@ -171,7 +173,8 @@ class ServiceMonitor
 
 🌟 جهت تهیه سرویس جدید از بخش خرید سرویس اقدام فرمایید";
             $reportMessage = "📌  اطلاعیه کرون حذف حجم \nنام کاربری سرویس : $username \n وضعیت سرویس : $statusText \nتعداد روز باقی مانده :$daysRemaining \n حجم باقی مانده : $remainingVolume\nآخرین اتصال کاربر : {$userData['online_at']}";
-            $this->send_notifactions($invoice, $user, $message, false, $invoice['bottype']);
+            $shouldNotify = !empty($user['status_cron'] ?? null);
+            $this->send_notifactions($invoice, $shouldNotify, $message, false, $invoice['bottype']);
             $this->sendReportNotification($reportMessage);
         }
     }
@@ -208,16 +211,19 @@ class ServiceMonitor
                 "نام کاربری سرویس :‌ <code>{$invoice['username']}</code>\n" .
                 "وضعیت سرویس : {$userData['status']}\n" .
                 "تعداد روز باقی مانده ‌:‌{$daysRemaining}";
-            $this->send_notifactions($invoice, $user, $message, true,$invoice['bottype']);
+            $shouldNotify = !empty($user['status_cron'] ?? null);
+            $this->send_notifactions($invoice, $shouldNotify, $message, true, $invoice['bottype']);
             $this->sendReportNotification($reportMessage);
             $this->updateInvoiceStatus("time", $invoice);
             return true;
         }
     }
 
-    private function send_notifactions($invoice, $status_cron_user, $message, $keyboard_active, $bot_token)
+    private function send_notifactions($invoice, bool $shouldNotify, $message, $keyboard_active, $bot_token)
     {
-        if (intval($status_cron_user) == 0) return;
+        if (!$shouldNotify) {
+            return;
+        }
         $keyboard = $this->createExtendServiceKeyboard($invoice['id_invoice']);
         $keyboard = $keyboard_active ? $keyboard : null;
         sendmessage($invoice['id_user'], $message, $keyboard, 'HTML', $bot_token);

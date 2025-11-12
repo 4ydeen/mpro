@@ -1,8 +1,343 @@
 <?php
 #----------------[  admin section  ]------------------#
 $textadmin = ["panel", "/panel", $textbotlang['Admin']['textpaneladmin']];
+$text_panel_admin_login_base64_parts = [
+    '8J+SjiB8IFZlcnNpb24gQm90OiA1LjEwLjc3ICAK8J+TjCB8IFZlcnNpb24gTWluaSBBcHA6IDAuMS4x',
+    'CjxibG9ja3F1b3RlPvCflLkgfCDYp9uM2YYg2LHYqNin2Kog2qnYp9mF2YTYp9mLINix2KfbjNqv2KfZ',
+    'hiDYp9iz2Kog2Ygg2KrZiNiz2Lcg2KrZiNiz2LnZh+KAjNiv2YfZhtiv2Ycg2YXbjNix2LLYpyDYudix',
+    '2LbZhyDYtNiv2Ycg2YggbW1kOGFtaXIg2K/bjNio2KfaryDYtNiv2Ycg2KfYs9iqLjwvYmxvY2txdW90',
+    'ZT4KCjxibG9ja3F1b3RlPvCflLkgfCDZh9ix2q/ZiNmG2Ycg2YHYsdmI2LQg24zYpyDYr9ix24zYp9mB',
+    '2Kog2YjYrNmHINio2KfYqNiqINin24zZhiDYsdio2KfYqiDYqtiu2YTZgSDZhdit2LPZiNioINmF24zi',
+    'gIzYtNmI2K8uPC9ibG9ja3F1b3RlPgoKPGJsb2NrcXVvdGU+8J+UuSB8INiv2LEg2LXZiNix2Kog2YXY',
+    'tNin2YfYr9mH2ZQg2YHYsdmI2LQg24zYpyDYr9ix24zYp9mB2Kog2YjYrNmH2Iwg2YTYt9mB2KfZiyDZ',
+    'iNis2Ycg2K7ZiNivINix2Kcg2b7bjNqv24zYsduMINqp2LHYr9mHINmIINio2KfYstm+2LPigIzar9uM',
+    '2LHbjCDZhtmF2KfbjNuM2K8uPC9ibG9ja3F1b3RlPgoKPGJsb2NrcXVvdGU+8J+QniB8INin2q/YsSDY',
+    'r9ixINi52YXZhNqp2LHYryDYsdio2KfYqiDYqNinINio2KfaryDbjNinINmF2LTaqdmE24wg2YXZiNin',
+    '2KzZhyDYtNiv24zYr9iMINin2LIg2LfYsduM2YIg2K/aqdmF2YfZlCA8Yj7wn5OsINqv2LLYp9ix2LQg',
+    '2LHYqNin2Ko8L2I+INiv2LEg2b7ZhtmEINin2K/ZhduM2YYg2KjYpyDZhdinINiv2LEg2KfYsdiq2KjY',
+    'p9i3INio2KfYtNuM2K8uPC9ibG9ja3F1b3RlPg==',
+];
+$text_panel_admin_login_base64 = implode('', $text_panel_admin_login_base64_parts);
+$text_panel_admin_login_template = base64_decode($text_panel_admin_login_base64, true) ?: '';
+
+function normalizeXuiSingleSubscriptionBaseUrl($rawLink)
+{
+    $trimmed = trim((string) $rawLink);
+    if ($trimmed === '') {
+        return '';
+    }
+
+    $parts = preg_split('/\s+/u', $trimmed, -1, PREG_SPLIT_NO_EMPTY);
+    $candidate = trim((string) ($parts[0] ?? ''));
+    if ($candidate === '') {
+        return '';
+    }
+
+    $candidate = rtrim($candidate, '/');
+    $urlForProcessing = $candidate;
+    if (!preg_match('~^https?://~i', $urlForProcessing)) {
+        $urlForProcessing = 'https://' . ltrim($urlForProcessing, '/');
+    }
+
+    if (!filter_var($urlForProcessing, FILTER_VALIDATE_URL)) {
+        return $candidate;
+    }
+
+    $shouldTrim = false;
+    $request = new CurlRequest($urlForProcessing);
+    $response = $request->get();
+    if (isset($response['status']) && $response['status'] >= 200 && $response['status'] < 400 && empty($response['error'])) {
+        $body = $response['body'];
+        if (isBase64($body)) {
+            $body = base64_decode($body);
+        }
+        $protocols = ['vmess', 'vless', 'trojan', 'ss'];
+        $sub_check = explode('://', $body)[0];
+        if (in_array($sub_check, $protocols, true)) {
+            $shouldTrim = true;
+        }
+    }
+
+    if (!$shouldTrim) {
+        $shouldTrim = hasLikelyXuiSubscriptionId($urlForProcessing);
+    }
+
+    $normalized = buildXuiSingleBaseUrl($urlForProcessing, $shouldTrim);
+    if ($normalized === '' || preg_match('~^https?:$~i', $normalized)) {
+        $normalized = buildXuiSingleBaseUrl($urlForProcessing, false);
+    }
+
+    return $normalized;
+}
+
+function buildXuiSingleBaseUrl($url, $dropLastSegment)
+{
+    $parsed = parse_url($url);
+    if ($parsed === false) {
+        return rtrim($url, '/');
+    }
+
+    $scheme = isset($parsed['scheme']) ? $parsed['scheme'] . '://' : '';
+    $host = $parsed['host'] ?? '';
+    $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+    $user = $parsed['user'] ?? '';
+    $pass = $parsed['pass'] ?? '';
+
+    $auth = '';
+    if ($user !== '') {
+        $auth = $user;
+        if ($pass !== '') {
+            $auth .= ':' . $pass;
+        }
+        $auth .= '@';
+    }
+
+    $path = $parsed['path'] ?? '';
+    $path = trim($path, '/');
+    if ($dropLastSegment && $path !== '') {
+        $segments = explode('/', $path);
+        array_pop($segments);
+        $path = implode('/', $segments);
+    }
+
+    if ($path !== '') {
+        $path = '/' . $path;
+    }
+
+    $query = isset($parsed['query']) && $parsed['query'] !== '' ? '?' . $parsed['query'] : '';
+    $fragment = isset($parsed['fragment']) && $parsed['fragment'] !== '' ? '#' . $parsed['fragment'] : '';
+
+    return rtrim($scheme . $auth . $host . $port . $path, '/') . $query . $fragment;
+}
+
+function hasLikelyXuiSubscriptionId($url)
+{
+    $parsed = parse_url($url);
+    if ($parsed === false) {
+        return false;
+    }
+
+    $candidates = [];
+
+    $path = $parsed['path'] ?? '';
+    $path = trim($path, '/');
+    if ($path !== '') {
+        $segments = explode('/', $path);
+        if (!empty($segments)) {
+            $lastSegment = $segments[count($segments) - 1];
+            if ($lastSegment !== '') {
+                $candidates[] = $lastSegment;
+            }
+        }
+    }
+
+    if (!empty($parsed['query'])) {
+        parse_str($parsed['query'], $queryParams);
+        foreach ($queryParams as $value) {
+            if (is_array($value)) {
+                foreach ($value as $item) {
+                    if (is_scalar($item)) {
+                        $candidates[] = (string) $item;
+                    }
+                }
+            } elseif (is_scalar($value)) {
+                $candidates[] = (string) $value;
+            }
+        }
+    }
+
+    foreach ($candidates as $candidate) {
+        if ($candidate === '') {
+            continue;
+        }
+        if (preg_match('~^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$~i', $candidate)) {
+            return true;
+        }
+        if (strlen($candidate) >= 16 && preg_match('~^[A-Za-z0-9=_-]+$~', $candidate)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function getPanelStateFromConfigFile($configPath)
+{
+    if (!is_string($configPath) || $configPath === '' || !is_readable($configPath)) {
+        return null;
+    }
+
+    $configContents = file_get_contents($configPath);
+    if ($configContents === false) {
+        return null;
+    }
+
+    if (preg_match('/^\s*\/\/\/\s*\$new_marzban\s*=\s*true\s*;/m', $configContents)) {
+        return 'marzban';
+    }
+
+    if (preg_match('/^\s*\$new_marzban\s*=\s*true\s*;/m', $configContents)) {
+        return 'pasargad';
+    }
+
+    return null;
+}
+
+function getPanelStateLabel($state)
+{
+    switch ($state) {
+        case 'pasargad':
+            return 'پاسارگارد';
+        case 'marzban':
+            return 'مرزبان';
+        default:
+            return 'نامشخص';
+    }
+}
+
+function buildPanelSelectionMessage($configPath)
+{
+    $currentState = getPanelStateFromConfigFile($configPath);
+    $currentLabel = getPanelStateLabel($currentState);
+
+    return "💠 لطفاً نوع پنل خود را انتخاب کنید 👇\n🧾 نوع فعلی پنل: {$currentLabel}";
+}
+
+function getPanelSelectionKeyboard()
+{
+    $keyboard = [
+        'inline_keyboard' => [
+            [
+                ['text' => '🧩 مرزبان', 'callback_data' => 'set_panel_marzban'],
+                ['text' => '🏛 پاسارگارد', 'callback_data' => 'set_panel_pasargad'],
+            ],
+        ],
+    ];
+
+    return json_encode($keyboard, JSON_UNESCAPED_UNICODE);
+}
+
+function updatePanelStateInConfigFile($configPath, $state)
+{
+    if (!is_string($configPath) || $configPath === '' || !is_readable($configPath) || !is_writable($configPath)) {
+        return false;
+    }
+
+    $configContents = file_get_contents($configPath);
+    if ($configContents === false) {
+        return false;
+    }
+
+    $activePattern = '/^\s*\$new_marzban\s*=\s*true\s*;/m';
+    $commentPattern = '/^\s*\/\/\/\s*\$new_marzban\s*=\s*true\s*;/m';
+    $replacementLine = $state === 'pasargad' ? '$new_marzban = true;' : '///$new_marzban = true;';
+
+    $count = 0;
+    $updatedContents = preg_replace($activePattern, $replacementLine, $configContents, 1, $count);
+    if ($updatedContents === null) {
+        return false;
+    }
+
+    if ($count === 0) {
+        $updatedContents = preg_replace($commentPattern, $replacementLine, $updatedContents, 1, $count);
+        if ($updatedContents === null) {
+            return false;
+        }
+    }
+
+    if ($count === 0) {
+        $closingTagPattern = '/\?>\s*$/';
+        if (preg_match($closingTagPattern, $updatedContents)) {
+            $updatedContents = preg_replace($closingTagPattern, $replacementLine . PHP_EOL . '?>', $updatedContents, 1);
+            if ($updatedContents === null) {
+                return false;
+            }
+        } else {
+            $updatedContents .= PHP_EOL . $replacementLine . PHP_EOL;
+        }
+    }
+
+    $result = file_put_contents($configPath, $updatedContents);
+    if ($result === false) {
+        return false;
+    }
+
+    clearstatcache(true, $configPath);
+
+    return true;
+}
+
 if (!in_array($from_id, $admin_ids))
     return;
+
+$users_ids = select('user', 'id', null, null, 'FETCH_COLUMN');
+if (!is_array($users_ids)) {
+    $users_ids = [];
+}
+
+$domainhostsEscaped = htmlspecialchars($domainhosts, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+$miniAppInstructionText = <<<HTML
+📌 آموزش فعالسازی مینی اپ در ربات BotFather
+
+/mybots > Select Bot > Bot Setting >  Configure Mini App > Enable Mini App  > Edit Mini App URL
+
+مراحل بالا را طی کنید سپس آدرس زیر را ارسال نمایید :
+
+<code>https://{$domainhostsEscaped}/app/</code>
+
+➖➖➖➖➖➖➖➖➖➖➖➖
+⚙️ تنظیم کرون‌جاب‌ها در هاست
+
+<b>🕒 بررسی وضعیت روزانه — هر 15 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/statusday.php</code>
+
+<b>🔔 سرویس اعلان‌ها (Notification Service) — هر 1 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/NoticationsService.php</code>
+
+<b>💳 بررسی انقضای پرداخت‌ها — هر 5 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/payment_expire.php</code>
+
+<b>📩 ارسال پیام‌ها — هر 1 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/sendmessage.php</code>
+
+<b>💰 پردازش پرداخت‌های Plisio — هر 3 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/plisio.php</code>
+
+<b>⚙️ فعال‌سازی تنظیمات جدید — هر 1 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/activeconfig.php</code>
+
+<b>🚫 غیرفعال‌سازی تنظیمات قدیمی — هر 1 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/disableconfig.php</code>
+
+<b>🇮🇷 بررسی وضعیت پرداخت ایران‌پی — هر 1 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/iranpay1.php</code>
+
+<b>🗄 تهیه نسخه‌ی پشتیبان (Backup) — هر 5 ساعت</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/backupbot.php</code>
+
+<b>🎁 ارسال هدایا (Gift System) — هر 2 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/gift.php</code>
+
+<b>👥 بررسی انقضای نمایندگان — هر 30 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/expireagent.php</code>
+
+<b>⏸ بررسی وضعیت سفارش‌های معلق — هر 15 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/on_hold.php</code>
+
+<b>🧪 تست تنظیمات سیستم — هر 2 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/configtest.php</code>
+
+<b>🌐 بررسی Uptime نودها — هر 15 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/uptime_node.php</code>
+
+<b>🖥 بررسی Uptime پنل‌ها — هر 15 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/uptime_panel.php</code>
+
+<b>💳 انجام تراکنش‌های کارت‌به‌کارت — هر 1 دقیقه</b>
+<code>curl https://{$domainhostsEscaped}/cronbot/croncard.php</code>
+HTML;
+
 if (in_array($text, $textadmin) || $datain == "admin") {
     if ($datain == "admin")
         deletemessage($from_id, $message_id);
@@ -11,45 +346,187 @@ if (in_array($text, $textadmin) || $datain == "admin") {
         return;
     }
     $version_mini_app = file_get_contents('app/version');
-    $version_Bot_Agent = file_get_contents('vpnbot/update/version');
     activecron();
-    $text_admin = sprintf($textbotlang['Admin']['TextPanelAdminLogin'], $version, $version_mini_app, $version_Bot_Agent);
-    $how_active_mini_app = "📌 آموزش فعالسازی مینی اپ در ربات BotFather
-
-/mybots > Select Bot > Bot Setting >  Configure Mini App > Enable Mini App  > Edit Mini App URL
-
-مراحل بالا را طی کنید سپس آدرس زیر را ارسال نمایید :
-
-<code>https://$domainhosts/app/</code>";
-
+    $text_admin = sprintf($text_panel_admin_login_template, $version, $version_mini_app);
     sendmessage($from_id, $text_admin, $keyboardadmin, 'HTML');
-    sendmessage($from_id, $how_active_mini_app, null, 'HTML');
+    $miniAppInstructionHidden = isset($user['hide_mini_app_instruction']) ? (string) $user['hide_mini_app_instruction'] : '0';
+    if ($miniAppInstructionHidden !== '1') {
+        $miniAppInstructionKeyboard = json_encode([
+            'inline_keyboard' => [
+                [
+                    ['text' => 'دیگر نمایش نده ⛓️‍💥', 'callback_data' => 'hide_mini_app_instruction'],
+                ],
+            ],
+        ]);
+        sendmessage($from_id, $miniAppInstructionText, $miniAppInstructionKeyboard, 'HTML');
+    }
 } elseif ($text == $textbotlang['Admin']['backadmin']) {
     if ($buyreport == "0" || $otherservice == "0" || $otherreport == "0" || $paymentreports == "0" || $reporttest == "0" || $errorreport == "0") {
         sendmessage($from_id, $textbotlang['Admin']['activebottext'], $active_panell, 'HTML');
         return;
     }
     $version_mini_app = file_get_contents('app/version');
-    $version_Bot_Agent = file_get_contents('vpnbot/update/version');
-    $text_admin = sprintf($textbotlang['Admin']['TextPanelAdminLogin'], $version, $version_mini_app, $version_Bot_Agent);
+    $text_admin = sprintf($text_panel_admin_login_template, $version, $version_mini_app);
     sendmessage($from_id, $text_admin, $keyboardadmin, 'HTML');
     step('home', $from_id);
+    return;
+} elseif ($datain == "hide_mini_app_instruction") {
+    if (!in_array($from_id, $admin_ids))
+        return;
+    if (($user['hide_mini_app_instruction'] ?? '0') !== '1') {
+        update("user", "hide_mini_app_instruction", "1", "id", $from_id);
+        $user['hide_mini_app_instruction'] = '1';
+    }
+    $confirmationKeyboard = json_encode(['inline_keyboard' => []]);
+    $confirmationText = $miniAppInstructionText . "\n\n✅ این پیام دیگر برای شما نمایش داده نخواهد شد.";
+    Editmessagetext($from_id, $message_id, $confirmationText, $confirmationKeyboard, 'HTML');
     return;
 } elseif ($text == $textbotlang['Admin']['backmenu']) {
     if ($buyreport == "0" || $otherservice == "0" || $otherreport == "0" || $paymentreports == "0" || $reporttest == "0" || $errorreport == "0") {
         sendmessage($from_id, $textbotlang['Admin']['activebottext'], $setting_panel, 'HTML');
         return;
     }
+    $currentStep = isset($user['step']) ? (string) $user['step'] : '';
     step('home', $from_id);
-    if (in_array($user['step'], ["updatetime", "val_usertest", "getlimitnew", "GetusernameNew", "GeturlNew", "protocolset", "updatemethodusername", "GetNameNew", "getprotocol", "getprotocolremove", "GetpaawordNew", "updateextendmethod", "setpricechangelocation"])) {
+    if (in_array($currentStep, ["updatetime", "val_usertest", "getlimitnew", "GetusernameNew", "GeturlNew", "protocolset", "updatemethodusername", "GetNameNew", "getprotocol", "getprotocolremove", "GetpaawordNew", "updateextendmethod", "setpricechangelocation"])) {
         $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
         outtypepanel($typepanel['type'], $textbotlang['Admin']['Back-menu']);
-    } elseif (in_array($user['step'], ["selectloc", "get_limit", "selectlocedite", "GetPriceExtra", "GetPriceexstratime", "GetPricecustomtime", "GetPricecustomvolume", "get_code", "get_codesell", "minbalancebulk"])) {
-        sendmessage($from_id, $textbotlang['Admin']['Back-menu'], $shopkeyboard, 'HTML');
-    } elseif (in_array($user['step'], ["addchannel", "removechannel"])) {
-        sendmessage($from_id, $textbotlang['Admin']['Back-menu'], $channelkeyboard, 'HTML');
     } else {
-        sendmessage($from_id, $textbotlang['Admin']['Back-Admin'], $keyboardadmin, 'HTML');
+        $financialStepKeyboardMap = [
+            'apiternado' => $trnado,
+            'changecard' => $CartManage,
+            'getnamecard' => $CartManage,
+            'getnamecarttocart' => $CartManage,
+            'getnamenowpayment' => $nowpayment_setting_keyboard,
+            'getnamecarttopaynotverify' => $CartManage,
+            'gettextnowpayment' => $NowPaymentsManage,
+            'gettextnowpaymentTRON' => $tronnowpayments,
+            'gettextiranpay2' => $Swapinokey,
+            'gettextstartelegram' => $Swapinokey,
+            'gettextiranpay3' => $trnado,
+            'gettextiranpay1' => $iranpaykeyboard,
+            'gettextaqayepardakht' => $aqayepardakht,
+            'gettextzarinpal' => $keyboardzarinpal,
+            'gettextzarinpey' => $keyboardzarinpey,
+            'token_zarinpey' => $keyboardzarinpey,
+            'merchant_id_aqayepardakht' => $aqayepardakht,
+            'merchant_zarinpal' => $keyboardzarinpal,
+            'apinowpayment' => $NowPaymentsManage,
+            'getcashcart' => $CartManage,
+            'getcashahaypar' => $CartManage,
+            'getcashiranpay2' => $trnado,
+            'getcashiranpay4' => $CartManage,
+            'getcashiranpay1' => $Swapinokey,
+            'getcashplisio' => $CartManage,
+            'getcashnowpayment' => $nowpayment_setting_keyboard,
+            'getcashzarinpal' => $keyboardzarinpal,
+            'getcashzarinpey' => $keyboardzarinpey,
+            'getmaincart' => $CartManage,
+            'getmaxcart' => $CartManage,
+            'getmainplisio' => $NowPaymentsManage,
+            'getmaxplisio' => $NowPaymentsManage,
+            'getmaindigitaltron' => $tronnowpayments,
+            'getmaxdigitaltron' => $tronnowpayments,
+            'getmainiranpay1' => $Swapinokey,
+            'getmaaxiranpay1' => $Swapinokey,
+            'getmainiranpay2' => $trnado,
+            'getmaaxiranpay2' => $Swapinokey,
+            'getmainaqayepardakht' => $aqayepardakht,
+            'getmaaxaqayepardakht' => $aqayepardakht,
+            'getmainaqzarinpal' => $aqayepardakht,
+            'getmaaxzarinpal' => $aqayepardakht,
+            'getmainzarinpey' => $keyboardzarinpey,
+            'getmaaxzarinpey' => $keyboardzarinpey,
+            'helpzarinpey' => $keyboardzarinpey,
+            'gethelpcart' => $CartManage,
+            'gethelpnowpayment' => $nowpayment_setting_keyboard,
+            'gethelpperfect' => $CartManage,
+            'gethelpplisio' => $CartManage,
+            'gethelpiranpay1' => $CartManage,
+            'getmainaqstar' => $Startelegram,
+            'maxbalancestar' => $Startelegram,
+            'getmainaqnowpayment' => $nowpayment_setting_keyboard,
+            'maxbalancenowpayment' => $nowpayment_setting_keyboard,
+            'gethelpstar' => $Startelegram,
+            'chashbackstar' => $Startelegram,
+        ];
+
+        $productStepKeyboardMap = [
+            'change_price' => $change_product,
+            'change_note' => $change_product,
+            'change_categroy' => $change_product,
+            'change_name' => $change_product,
+            'change_type_agent' => $change_product,
+            'change_reset_data' => $change_product,
+            'change_loc_data' => $change_product,
+            'getlistpanel' => $change_product,
+            'change_val' => $change_product,
+            'change_time' => $change_product,
+        ];
+
+        if ($currentStep === 'walletaddresssiranpay') {
+            $processingData = [];
+            if (isset($user['Processing_value'])) {
+                $decodedProcessing = json_decode($user['Processing_value'], true);
+                if (is_array($decodedProcessing)) {
+                    $processingData = $decodedProcessing;
+                }
+            }
+            $walletOrigin = $processingData['walletaddress_origin'] ?? 'general';
+            $keyboard = $walletOrigin === 'trnado' ? $trnado : $keyboardadmin;
+            sendmessage($from_id, $textbotlang['Admin']['Back-menu'], $keyboard, 'HTML');
+            return;
+        }
+
+        if (isset($financialStepKeyboardMap[$currentStep])) {
+            $targetKeyboard = $financialStepKeyboardMap[$currentStep];
+            sendmessage($from_id, $textbotlang['Admin']['Back-menu'], $targetKeyboard, 'HTML');
+            return;
+        }
+
+        if (isset($productStepKeyboardMap[$currentStep])) {
+            $targetKeyboard = $productStepKeyboardMap[$currentStep];
+            sendmessage($from_id, $textbotlang['Admin']['Back-menu'], $targetKeyboard, 'HTML');
+            return;
+        }
+
+        $shopSteps = [
+            "selectloc",
+            "get_limit",
+            "selectlocedite",
+            "GetPriceExtra",
+            "GetPriceexstratime",
+            "GetPricecustomtime",
+            "GetPricecustomvolume",
+            "get_code",
+            "get_codesell",
+            "minbalancebulk",
+            "get_agent",
+            "get_location",
+            "getcategory",
+            "get_time",
+            "get_price",
+            "gettimereset",
+            "getnote",
+            "endstep",
+            "gettypeextra",
+            "gettypeextracustom",
+            "gettypeextratime",
+            "gettypeextratimecustom",
+            "gettypeextramain",
+            "gettypeextramax",
+            "gettypeextramaintime",
+            "gettypeextramaxtime",
+        ];
+
+        if (in_array($currentStep, $shopSteps, true)) {
+            sendmessage($from_id, $textbotlang['Admin']['Back-menu'], $shopkeyboard, 'HTML');
+            return;
+        } elseif (in_array($currentStep, ["addchannel", "removechannel"])) {
+            sendmessage($from_id, $textbotlang['Admin']['Back-menu'], $channelkeyboard, 'HTML');
+        } else {
+            sendmessage($from_id, $textbotlang['Admin']['Back-Admin'], $keyboardadmin, 'HTML');
+        }
     }
     return;
 } elseif ($text == $textbotlang['Admin']['channel']['title'] && $adminrulecheck['rule'] == "administrator") {
@@ -69,13 +546,46 @@ if (in_array($text, $textadmin) || $datain == "admin") {
         return;
     }
     $userdata = json_decode($user['Processing_value'], true);
+    if (!is_array($userdata)) {
+        $userdata = [];
+    }
+
+    $remark = isset($userdata['remark']) ? (string) $userdata['remark'] : '';
+    $link = isset($userdata['link']) ? (string) $userdata['link'] : '';
+
     sendmessage($from_id, "✅ کانال جوین اجباری با موفقیت ثبت گردید.", $channelkeyboard, 'HTML');
     step('home', $from_id);
-    $stmt = $pdo->prepare("INSERT INTO channels (link,remark,linkjoin) VALUES (:link,:remark,:linkjoin)");
-    $stmt->bindParam(':remark', $userdata['remark'], PDO::PARAM_STR);
-    $stmt->bindParam(':link', $userdata['link'], PDO::PARAM_STR);
-    $stmt->bindParam(':linkjoin', $text, PDO::PARAM_STR);
-    $stmt->execute();
+
+    $insertChannel = function ($remarkValue) use ($pdo, $link, $text) {
+        $stmt = $pdo->prepare("INSERT INTO channels (link, remark, linkjoin) VALUES (:link, :remark, :linkjoin)");
+        $stmt->bindValue(':remark', $remarkValue, PDO::PARAM_STR);
+        $stmt->bindValue(':link', $link, PDO::PARAM_STR);
+        $stmt->bindValue(':linkjoin', $text, PDO::PARAM_STR);
+        $stmt->execute();
+    };
+
+    try {
+        $insertChannel($remark);
+    } catch (PDOException $e) {
+        if (strpos($e->getMessage(), 'Incorrect string value') !== false) {
+            ensureTableUtf8mb4('channels');
+            try {
+                $insertChannel($remark);
+            } catch (PDOException $retryException) {
+                if (strpos($retryException->getMessage(), 'Incorrect string value') === false) {
+                    throw $retryException;
+                }
+
+                $sanitisedRemark = is_string($remark) ? @iconv('UTF-8', 'UTF-8//IGNORE', $remark) : '';
+                if ($sanitisedRemark === false) {
+                    $sanitisedRemark = '';
+                }
+                $insertChannel($sanitisedRemark);
+            }
+        } else {
+            throw $e;
+        }
+    }
 } elseif ($text == $textbotlang['Admin']['channel']['removechannelbtn'] && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['channel']['removechannel'], $list_channels_joins, 'HTML');
     step('removechannel', $from_id);
@@ -89,7 +599,12 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     sendmessage($from_id, $textbotlang['Admin']['manageadmin']['getid'], $backadmin, 'HTML');
     step('addadmin', $from_id);
 } elseif ($user['step'] == "addadmin") {
-    update("user", "Processing_value", $text, "id", $from_id);
+    $adminId = trim($text);
+    if ($adminId === '') {
+        sendmessage($from_id, $textbotlang['Admin']['manageadmin']['getid'], $backadmin, 'HTML');
+        return;
+    }
+    update("user", "Processing_value", $adminId, "id", $from_id);
     sendmessage($from_id, $textbotlang['Admin']['manageadmin']['setrule'], $adminrule, 'HTML');
     step('getrule', $from_id);
 } elseif ($user['step'] == "getrule") {
@@ -158,10 +673,13 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     $invoicesum = $stmt2->fetch(PDO::FETCH_ASSOC)['total_price'];
     $sql33 = "SELECT SUM(price_product) AS total_price FROM invoice WHERE status!= 'Unpaid' AND name_product != 'سرویس تست'";
     $sql33 = $pdo->query($sql33);
-    $invoicesumall = number_format($sql33->fetch(PDO::FETCH_ASSOC)['total_price'], 0);
+    $invoiceSumRow = $sql33->fetch(PDO::FETCH_ASSOC);
+    $invoiceTotal = isset($invoiceSumRow['total_price']) ? (float) $invoiceSumRow['total_price'] : 0;
+    $invoicesumall = number_format($invoiceTotal, 0);
     $sql3 = "SELECT SUM(price) AS total_extend FROM service_other WHERE type = 'extend_user'";
     $stmt3 = $pdo->query($sql3);
-    $extendsum = $stmt3->fetch(PDO::FETCH_ASSOC)['total_extend'];
+    $extendSumRow = $stmt3->fetch(PDO::FETCH_ASSOC);
+    $extendsum = isset($extendSumRow['total_extend']) ? (float) $extendSumRow['total_extend'] : 0;
     $count_usertest = select("invoice", "*", "name_product", "سرویس تست", "count");
     $timeacc = jdate('H:i:s', time());
     $stmt2 = $pdo->prepare("SELECT COUNT(DISTINCT id_user) as count FROM `invoice` WHERE Status != 'Unpaid'");
@@ -183,40 +701,57 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     $stmt->bindParam(':requestedDateend', $end_time_timestamp);
     $stmt->execute();
     $suminvoiceday = $stmt->fetch(PDO::FETCH_ASSOC)['SUM(price_product)'];
-    ;
+    $invoicesum = (float) ($invoicesum ?? 0);
+    $extendsum = (float) ($extendsum ?? 0);
+    $suminvoiceday = (float) ($suminvoiceday ?? 0);
+    $statistics = (int) ($statistics ?? 0);
+    $statisticsorder = (int) ($statisticsorder ?? 0);
     $paycount = "";
-    $ratecustomer = round(($statisticsorder / $statisticsorder) * 100, 2);
-    $avgbuy_customer = number_format($invoicesum / $statisticsorder);
+    $ratecustomer = round(safe_divide($statisticsorder * 100, $statistics, 0), 2);
+    $averagePurchase = safe_divide($invoicesum, $statisticsorder, 0);
+    $avgbuy_customer = $averagePurchase > 0 ? number_format($averagePurchase) : '0';
     $monthe_buy = number_format($suminvoiceday * 30);
-    $percent_of_extend = $extendsum != 0 ? round(($extendsum / $invoicesum) * 100, 2) : 0;
+    $percent_of_extend = round(safe_divide($extendsum * 100, $invoicesum, 0), 2);
     $percent_of_extend = $percent_of_extend > 100 ? 100 : $percent_of_extend;
     $extendsum = number_format($extendsum, 0);
-    if (count($statispay) != 0) {
-        foreach ($statispay as $tracepay) {
-            $status_var = [
-                'cart to cart' => $datatextbot['carttocart'],
-                'aqayepardakht' => $datatextbot['aqayepardakht'],
-                'zarinpal' => $datatextbot['zarinpal'],
-                'plisio' => $datatextbot['textnowpayment'],
-                'arze digital offline' => $datatextbot['textnowpaymenttron'],
-                'Currency Rial 1' => $datatextbot['iranpay2'],
-                'Currency Rial 2' => $datatextbot['iranpay3'],
-                'Currency Rial 3' => $datatextbot['iranpay1'],
-                'paymentnotverify' => $datatextbot['textpaymentnotverify'],
-                'Star Telegram' => $datatextbot['text_star_telegram']
+    if (!empty($statispay)) {
+        $statusLabels = [
+            'cart to cart' => $datatextbot['carttocart'] ?? 'cart to cart',
+            'aqayepardakht' => $datatextbot['aqayepardakht'] ?? 'aqayepardakht',
+            'zarinpal' => $datatextbot['zarinpal'] ?? 'zarinpal',
+            'zarinpey' => $datatextbot['zarinpey'] ?? 'zarinpey',
+            'zarinpay' => $datatextbot['zarinpey'] ?? ($datatextbot['zarinpal'] ?? 'zarinpay'),
+            'plisio' => $datatextbot['textnowpayment'] ?? 'plisio',
+            'arze digital offline' => $datatextbot['textnowpaymenttron'] ?? 'arze digital offline',
+            'Currency Rial 1' => $datatextbot['iranpay2'] ?? 'Currency Rial 1',
+            'Currency Rial 2' => $datatextbot['iranpay3'] ?? 'Currency Rial 2',
+            'Currency Rial 3' => $datatextbot['iranpay1'] ?? 'Currency Rial 3',
+            'paymentnotverify' => $datatextbot['textpaymentnotverify'] ?? 'paymentnotverify',
+            'Star Telegram' => $datatextbot['text_star_telegram'] ?? 'Star Telegram',
+        ];
 
-            ][$tracepay['Payment_Method']];
+        foreach ($statispay as $tracepay) {
+            $paymentMethod = $tracepay['Payment_Method'] ?? '';
+            $status_var = $statusLabels[$paymentMethod] ?? $paymentMethod;
             $paycount .= "
 📌 نام درگاه : <code>$status_var</code>
  - تعداد پرداخت موفق : <code>{$tracepay['countpay']}</code>
  - جمع پرداختی ها : <code>{$tracepay['sumpay']}</code>\n";
         }
     }
+    $bot_ping = 'نامشخص';
+    $ping_start_time = microtime(true);
+    $ping_response = telegram('getMe');
+    $ping_duration = (microtime(true) - $ping_start_time) * 1000;
+    if (is_array($ping_response) && !empty($ping_response['ok'])) {
+        $bot_ping = number_format(max($ping_duration, 0), 0) . ' میلی‌ثانیه';
+    }
+
     $statisticsall = "📊 <b>آمار کلی ربات</b>
 ━━━━━━━━━━━━━━━━━━
-👥 <b>تعداد کل کاربران:</b> <code>$statistics</code> نفر  
-💳 <b>کاربران دارای خرید:</b> <code>$statisticsorder</code> نفر  
-🧪 <b>اکانت‌های تست:</b> <code>$count_usertest</code> نفر  
+👥 <b>تعداد کل کاربران:</b> <code>$statistics</code> نفر
+💳 <b>کاربران دارای خرید:</b> <code>$statisticsorder</code> نفر
+🧪 <b>اکانت‌های تست:</b> <code>$count_usertest</code> نفر
 💰 <b>موجودی کل کاربران:</b> <code>$Balanceall</code> تومان  
 
 🧾 <b>تعداد کل فروش:</b> <code>$invoice</code> عدد  
@@ -231,9 +766,10 @@ if (in_array($text, $textadmin) || $datain == "admin") {
 
 
 👨‍💼 <b>تعداد کل نمایندگان:</b> <code>$agentsum</code> نفر  
-🔹 <b>نمایندگان نوع N:</b> <code>$agentsumn</code> نفر  
-🔸 <b>نمایندگان نوع N2:</b> <code>$agentsumn2</code> نفر  
-🧩 <b>تعداد پنل‌ها:</b> <code>$sumpanel</code> عدد  
+🔹 <b>نمایندگان نوع N:</b> <code>$agentsumn</code> نفر
+🔸 <b>نمایندگان نوع N2:</b> <code>$agentsumn2</code> نفر
+🧩 <b>تعداد پنل‌ها:</b> <code>$sumpanel</code> عدد
+📡 <b>پینگ ربات:</b> $bot_ping
 $paycount
 ";
     if ($datain == "stat_all_bot") {
@@ -241,6 +777,8 @@ $paycount
     } else {
         sendmessage($from_id, $statisticsall, $keyboard_stat, 'HTML');
     }
+} elseif ($datain == "close_stat") {
+    deletemessage($from_id, $message_id);
 } elseif ($datain == "hoursago_stat") {
     $desired_date_time_start = time() - 3600;
     $sql = "SELECT COUNT(*) AS count,SUM(price_product) as sum FROM invoice WHERE (time_sell BETWEEN :requestedDate AND :requestedDateend) AND Status != 'Unpaid'  AND name_product != 'سرویس تست'";
@@ -917,12 +1455,21 @@ $paycount
 }
 //_____________________[ message ]____________________________//
 elseif ($datain == "systemsms") {
+    $userslist = [];
     if (is_file('cronbot/users.json')) {
-        $userslist = json_decode(file_get_contents('cronbot/users.json'), true);
-        if (is_array($userslist) and count($userslist) != 0) {
-            sendmessage($from_id, "❌ سیستم ارسال پیام درحال انجام عملیات است پس از پایان و اطلاع رسانی  می توانید پیام جدید را ارسال نمایید.", $keyboardadmin, 'HTML');
-            return;
+        $fileContent = file_get_contents('cronbot/users.json');
+        if ($fileContent !== false && $fileContent !== '') {
+            $decodedList = json_decode($fileContent, true);
+            if (is_array($decodedList)) {
+                $userslist = $decodedList;
+            }
         }
+    } else {
+        file_put_contents('cronbot/users.json', json_encode([]));
+    }
+    if (count($userslist) != 0) {
+        sendmessage($from_id, "❌ سیستم ارسال پیام درحال انجام عملیات است پس از پایان و اطلاع رسانی  می توانید پیام جدید را ارسال نمایید.", $keyboardadmin, 'HTML');
+        return;
     }
     $listbtn = json_encode([
         'inline_keyboard' => [
@@ -2329,6 +2876,9 @@ $caption";
                 ['text' => "⚙️ تنظیمات", 'callback_data' => "changeloclimit"],
                 ['text' => $statuslimitchangeloc, 'callback_data' => "editstsuts-changeloc-{$setting['statuslimitchangeloc']}"],
                 ['text' => "🌍 محدودیت تغییر لوکیشن", 'callback_data' => "changeloc"],
+            ],
+            [
+                ['text' => "❌ بستن", 'callback_data' => 'close_stat']
             ]
         ]
     ]);
@@ -2458,18 +3008,31 @@ $caption";
         update("setting", "statuscopycart", $valuenew);
     } elseif ($type == "score") {
         if ($value == "1") {
-            $currentCronJobs = shell_exec("crontab -l");
-            $jobToRemove = "*/1 * * * * curl https://$domainhosts/cronbot/lottery.php";
-            $newCronJobs = preg_replace('/' . preg_quote($jobToRemove, '/') . '/', '', $currentCronJobs);
-            file_put_contents('/tmp/crontab.txt', $newCronJobs);
-            shell_exec('crontab /tmp/crontab.txt');
-            unlink('/tmp/crontab.txt');
+            if (isShellExecAvailable()) {
+                $crontabBinary = getCrontabBinary();
+                if ($crontabBinary === null) {
+                    error_log('Unable to locate crontab executable; cannot remove lottery cron job.');
+                } else {
+                    $currentCronJobs = runShellCommand(sprintf('%s -l 2>/dev/null', escapeshellarg($crontabBinary)));
+                    $jobToRemove = "*/1 * * * * curl https://$domainhosts/cronbot/lottery.php";
+                    $newCronJobs = preg_replace('/' . preg_quote($jobToRemove, '/') . '/', '', (string) $currentCronJobs);
+                    $tempCronFile = '/tmp/crontab.txt';
+                    file_put_contents($tempCronFile, trim($newCronJobs) . PHP_EOL);
+                    runShellCommand(sprintf('%s %s', escapeshellarg($crontabBinary), escapeshellarg($tempCronFile)));
+                    if (file_exists($tempCronFile)) {
+                        unlink($tempCronFile);
+                    }
+                }
+            } else {
+                error_log('Unable to remove lottery cron job because shell_exec is unavailable.');
+            }
             $valuenew = "0";
         } else {
-            $existingCronCommands = shell_exec('crontab -l');
             $phpFilePath = "https://$domainhosts/cronbot/lottery.php";
             $cronCommand = "*/1 * * * * curl $phpFilePath";
-            addCronIfNotExists($cronCommand);
+            if (!addCronIfNotExists($cronCommand)) {
+                error_log('Unable to register lottery cron job because shell_exec is unavailable.');
+            }
             $valuenew = "1";
         }
         update("setting", "scorestatus", $valuenew);
@@ -2939,6 +3502,9 @@ $caption";
                 ['text' => "⚙️ تنظیمات", 'callback_data' => "changeloclimit"],
                 ['text' => $statuslimitchangeloc, 'callback_data' => "editstsuts-changeloc-{$setting['statuslimitchangeloc']}"],
                 ['text' => "🌍 محدودیت تغییر لوکیشن", 'callback_data' => "changeloc"],
+            ],
+            [
+                ['text' => "❌ بستن", 'callback_data' => 'close_stat']
             ]
         ]
     ]);
@@ -2964,10 +3530,16 @@ $caption";
     step('addchannelid', $from_id);
 } elseif ($user['step'] == "addchannelid") {
     $outputcheck = sendmessage($text, $textbotlang['Admin']['Channel']['TestChannel'], null, 'HTML');
-    if (!$outputcheck['ok']) {
-        $texterror = "❌ اتصال به گروه با موفقیت انجام نشد  
+    if (empty($outputcheck['ok'])) {
+        $errorDescription = 'نامشخص';
+        if (is_array($outputcheck) && isset($outputcheck['description'])) {
+            $errorDescription = $outputcheck['description'];
+        } elseif (is_string($outputcheck) && $outputcheck !== '') {
+            $errorDescription = $outputcheck;
+        }
+        $texterror = "❌ اتصال به گروه با موفقیت انجام نشد
 
-خطای دریافتی :  {$outputcheck['description']}";
+خطای دریافتی :  {$errorDescription}";
         sendmessage($from_id, $texterror, null, 'HTML');
         return;
     }
@@ -3094,8 +3666,13 @@ $caption";
         step("getcategory", $from_id);
         return;
     }
-    $panel = select("marzban_panel", "*", "name_panel", $text, "select");
-    if ($panel['type'] == "Manualsale") {
+    $panel = $text === '/all' ? null : select("marzban_panel", "*", "name_panel", $text, "select");
+    if ($text !== '/all' && !is_array($panel)) {
+        sendmessage($from_id, "❌ پنل انتخابی در دسترس نیست", $backadmin, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    if (is_array($panel) && ($panel['type'] ?? '') == "Manualsale") {
         savedata("save", "Service_time", "0");
         savedata("save", "Volume_constraint", "0");
         sendmessage($from_id, $textbotlang['Admin']['Product']['GetPrice'], $backadmin, 'HTML');
@@ -3112,8 +3689,13 @@ $caption";
     }
     savedata("save", "category", $text);
     $userdata = json_decode($user['Processing_value'], true);
-    $panel = select("marzban_panel", "*", "name_panel", $userdata['Location'], "select");
-    if ($panel['type'] == "Manualsale") {
+    $panel = $userdata['Location'] === '/all' ? null : select("marzban_panel", "*", "name_panel", $userdata['Location'], "select");
+    if ($userdata['Location'] !== '/all' && !is_array($panel)) {
+        sendmessage($from_id, "❌ پنل انتخابی در دسترس نیست", $backadmin, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    if (is_array($panel) && ($panel['type'] ?? '') == "Manualsale") {
         savedata("save", "Service_time", "0");
         savedata("save", "Volume_constraint", "0");
         sendmessage($from_id, $textbotlang['Admin']['Product']['GetPrice'], $backadmin, 'HTML');
@@ -3145,8 +3727,14 @@ $caption";
     }
     savedata("save", "price_product", $text);
     $userdata = json_decode($user['Processing_value'], true);
-    $panel = select("marzban_panel", "*", "name_panel", $userdata['Location'], "select");
-    if ($panel['type'] == "marzban" || $panel['type'] == "marzneshin") {
+    $panel = $userdata['Location'] === '/all' ? null : select("marzban_panel", "*", "name_panel", $userdata['Location'], "select");
+    if ($userdata['Location'] !== '/all' && !is_array($panel)) {
+        sendmessage($from_id, "❌ پنل انتخابی در دسترس نیست", $backadmin, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $panelType = is_array($panel) ? ($panel['type'] ?? '') : '';
+    if ($panelType == "marzban" || $panelType == "marzneshin") {
         sendmessage($from_id, $textbotlang['Admin']['Product']['gettimereset'], $keyboardtimereset, 'HTML');
         step('getnote', $from_id);
         return;
@@ -3183,9 +3771,13 @@ $caption";
     $list_admin = select("admin", "*", null, null, "fetchAll");
     $keyboardadmin = ['inline_keyboard' => []];
     foreach ($list_admin as $admin) {
+        $adminId = isset($admin['id_admin']) ? trim($admin['id_admin']) : '';
+        if ($adminId === '') {
+            continue;
+        }
         $keyboardadmin['inline_keyboard'][] = [
-            ['text' => "❌", 'callback_data' => "removeadmin_" . $admin['id_admin']],
-            ['text' => $admin['id_admin'], 'callback_data' => "adminlist"],
+            ['text' => "❌", 'callback_data' => "removeadmin_" . $adminId],
+            ['text' => $adminId, 'callback_data' => "adminlist"],
         ];
     }
     $keyboardadmin['inline_keyboard'][] = [
@@ -3808,6 +4400,9 @@ $caption";
             ['text' => "محدودیت تغییر لوکیشن", 'callback_data' => "changeloclimitbyuser_" . $id_user]
         ];
     }
+    $keyboardmanage['inline_keyboard'][] = [
+        ['text' => "❌ بستن", 'callback_data' => 'close_stat']
+    ];
     $keyboardmanage = json_encode($keyboardmanage, JSON_UNESCAPED_UNICODE);
     $user['Balance'] = number_format($user['Balance']);
     if ($user['register'] != "none") {
@@ -3903,7 +4498,7 @@ $text_expie_agent
 🔰 مجموع فروش یک ماه گذشته : $suminvoicemonth تومان
 
 ";
-    if ($datain[0] == "u") {
+    if (is_string($datain) && isset($datain[0]) && $datain[0] == "u") {
         telegram('answerCallbackQuery', array(
             'callback_query_id' => $callback_query_id,
             'text' => "اطلاعات بروزرسانی گردید",
@@ -4023,11 +4618,25 @@ $text_expie_agent
     update("user", "Processing_value", $text, "id", $from_id);
     step('getnamecard', $from_id);
 } elseif ($user['step'] == "getnamecard") {
-    sendmessage($from_id, $textbotlang['Admin']['SettingPayment']['Savacard'], $CartManage, 'HTML');
-    $stmt = $connect->prepare("INSERT INTO card_number (cardnumber,namecard) VALUES (?,?)");
-    $stmt->bind_param("ss", $user['Processing_value'], $text);
-    $stmt->execute();
-    step('home', $from_id);
+    try {
+        if (function_exists('ensureCardNumberTableSupportsUnicode')) {
+            ensureCardNumberTableSupportsUnicode();
+        }
+
+        $stmt = $connect->prepare("INSERT INTO card_number (cardnumber,namecard) VALUES (?,?)");
+        $stmt->bind_param("ss", $user['Processing_value'], $text);
+        $stmt->execute();
+        $stmt->close();
+        sendmessage($from_id, $textbotlang['Admin']['SettingPayment']['Savacard'], $CartManage, 'HTML');
+        step('home', $from_id);
+    } catch (\mysqli_sql_exception $e) {
+        error_log('Failed to save card number: ' . $e->getMessage());
+        if (stripos($e->getMessage(), 'Incorrect string value') !== false) {
+            error_log('card_number insert failed due to charset mismatch. Please verify the table collation.');
+        }
+        sendmessage($from_id, "❌ ثبت شماره کارت ناموفق بود. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.", $backadmin, 'HTML');
+        step('home', $from_id);
+    }
 } elseif ($datain == "plisiosetting" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['users']['selectoption'], $NowPaymentsManage, 'HTML');
 } elseif ($text == "🧩 api plisio" && $adminrulecheck['rule'] == "administrator") {
@@ -4054,6 +4663,8 @@ $text_expie_agent
     sendmessage($from_id, $textbotlang['Admin']['SettingnowPayment']['Savaapi'], $keyboardadmin, 'HTML');
     update("PaySetting", "ValuePay", $text, "NamePay", "marchent_tronseller");
     step('home', $from_id);
+} elseif ($datain == "zarinpeysetting" && $adminrulecheck['rule'] == "administrator") {
+    sendmessage($from_id, "📌 یک گزینه را انتخاب کنید", $keyboardzarinpey, 'HTML');
 } elseif ($datain == "aqayepardakhtsetting" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['users']['selectoption'], $aqayepardakht, 'HTML');
 } elseif ($datain == "zarinpalsetting" && $adminrulecheck['rule'] == "administrator") {
@@ -4080,19 +4691,129 @@ $text_expie_agent
     sendmessage($from_id, $textbotlang['Admin']['SettingnowPayment']['Savaapi'], $keyboardzarinpal, 'HTML');
     update("PaySetting", "ValuePay", $text, "NamePay", "merchant_zarinpal");
     step('home', $from_id);
+} elseif ($text == "🗂 نام درگاه زرین پی") {
+    sendmessage($from_id, " 📌 نام درگاه را ارسال نمايید", $backadmin, 'HTML');
+    step("gettextzarinpey", $from_id);
+} elseif ($user['step'] == "gettextzarinpey") {
+    sendmessage($from_id, "✅  متن با موفقیت تنظیم گردید.", $keyboardzarinpey, 'HTML');
+    update("textbot", "text", $text, "id_text", "zarinpey");
+    step("home", $from_id);
+} elseif ($text == "🔑 توکن زرین پی" && $adminrulecheck['rule'] == "administrator") {
+    $token = getPaySettingValue('token_zarinpey', '0');
+    $message = "🔑 توکن دسترسی زرین پی خود را ارسال کنید.\n\nتوکن فعلی شما: {$token}";
+    sendmessage($from_id, $message, $backadmin, 'HTML');
+    step('token_zarinpey', $from_id);
+} elseif ($user['step'] == "token_zarinpey") {
+    update("PaySetting", "ValuePay", $text, "NamePay", "token_zarinpey");
+    sendmessage($from_id, "✅ توکن با موفقیت ذخیره شد.", $keyboardzarinpey, 'HTML');
+    step('home', $from_id);
+} elseif ($text == "💰 کش بک زرین پی") {
+    sendmessage($from_id, "📌 در این بخش می توانید تعیین کنید کاربر پس از پرداخت چه درصدی به عنوان هدیه به حسابش واریز شود. ( برای غیرفعال کردن این قابلیت عدد صفر ارسال کنید)", $backadmin, 'HTML');
+    step("getcashzarinpey", $from_id);
+} elseif ($user['step'] == "getcashzarinpey") {
+    if (!ctype_digit($text)) {
+        sendmessage($from_id, $textbotlang['Admin']['agent']['invalidvlue'], $backadmin, 'HTML');
+        return;
+    }
+    update("PaySetting", "ValuePay", $text, "NamePay", "chashbackzarinpey");
+    sendmessage($from_id, "✅ مبلغ با موفقیت ذخیره گردید.", $keyboardzarinpey, 'HTML');
+    step('home', $from_id);
+} elseif ($text == "🧑🏼‍💻 اموزش اتصال") {
+    $inlineKeyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                [
+                    'text' => '📞 دریافت API  مشاوره',
+                    'url' => 'https://t.me/MiladRajabi2002',
+                ],
+            ],
+        ],
+    ], JSON_UNESCAPED_UNICODE);
+
+    $message = "🚀 درگاه کارت‌به‌کارت خودکار\n\nدرگاه هوشمند ZarinPay اکنون در میرزا بات نسخه پرو فعال است!\nتراکنش‌ها با خواندن پیامک بانکی به‌صورت خودکار و لحظه‌ای تأیید می‌شوند ⚡\nبدون نیاز به تأیید دستی، سریع، دقیق و ایمن 💳";
+
+    sendmessage($from_id, $message, $inlineKeyboard, 'HTML');
+    step('home', $from_id);
+} elseif ($text == "⬇️ حداقل مبلغ زرین پی") {
+    sendmessage($from_id, "📌 حداقل مبلغ واریزی را ارسال نمایید", $backadmin, 'HTML');
+    step("getmainzarinpey", $from_id);
+} elseif ($user['step'] == "getmainzarinpey") {
+    if (!ctype_digit($text)) {
+        sendmessage($from_id, $textbotlang['Admin']['agent']['invalidvlue'], $backadmin, 'HTML');
+        return;
+    }
+    update("PaySetting", "ValuePay", $text, "NamePay", "minbalancezarinpey");
+    sendmessage($from_id, "✅ حداقل مبلغ واریزی تنظیم گردید.", $keyboardzarinpey, 'HTML');
+    step('home', $from_id);
+} elseif ($text == "⬆️ حداکثر مبلغ زرین پی") {
+    sendmessage($from_id, "📌 حداکثر مبلغ واریزی را ارسال نمایید", $backadmin, 'HTML');
+    step("getmaaxzarinpey", $from_id);
+} elseif ($user['step'] == "getmaaxzarinpey") {
+    if (!ctype_digit($text)) {
+        sendmessage($from_id, $textbotlang['Admin']['agent']['invalidvlue'], $backadmin, 'HTML');
+        return;
+    }
+    update("PaySetting", "ValuePay", $text, "NamePay", "maxbalancezarinpey");
+    sendmessage($from_id, "✅ حداکثر مبلغ واریزی تنظیم گردید.", $keyboardzarinpey, 'HTML');
+    step('home', $from_id);
+} elseif ($text == "📚 تنظیم آموزش زرین پی" && $adminrulecheck['rule'] == "administrator") {
+    sendmessage($from_id, "📌آموزش خود را ارسال نمایید .\n۱ - در صورتی که میخواید اموزشی نشان داده نشود عدد 2 را ارسال کنید\n۲ - شما می توانید آموزش بصورت فیلم ُ  متن ُ تصویر ارسال نمایید", $backadmin, 'HTML');
+    step("helpzarinpey", $from_id);
+} elseif ($user['step'] == "helpzarinpey") {
+    if ($text) {
+        if ((int) $text === 2) {
+            update("PaySetting", "ValuePay", "0", "NamePay", "helpzarinpey");
+        } else {
+            $data = json_encode([
+                'type' => 'text',
+                'text' => $text,
+            ], JSON_UNESCAPED_UNICODE);
+            update("PaySetting", "ValuePay", $data, "NamePay", "helpzarinpey");
+        }
+    } elseif ($photo) {
+        $data = json_encode([
+            'type' => 'photo',
+            'text' => $caption,
+            'photoid' => $photoid,
+        ], JSON_UNESCAPED_UNICODE);
+        update("PaySetting", "ValuePay", $data, "NamePay", "helpzarinpey");
+    } elseif ($video) {
+        $data = json_encode([
+            'type' => 'video',
+            'text' => $caption,
+            'videoid' => $videoid,
+        ], JSON_UNESCAPED_UNICODE);
+        update("PaySetting", "ValuePay", $data, "NamePay", "helpzarinpey");
+    } else {
+        sendmessage($from_id, "❌ محتوای ارسال نامعتبر است.", $backadmin, 'HTML');
+        return;
+    }
+    sendmessage($from_id, "✅ آموزش با موفقیت ذخیره گردید.", $keyboardzarinpey, 'HTML');
+    step('home', $from_id);
 } elseif ($text == $textbotlang['Admin']['btnkeyboardadmin']['managementpanel'] && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['getloc'], $json_list_marzban_panel, 'HTML');
     step('GetLocationEdit', $from_id);
 } elseif ($user['step'] == "GetLocationEdit") {
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $text, "select");
+    if (!is_array($marzban_list_get) || empty($marzban_list_get)) {
+        $notFoundMessage = $textbotlang['Admin']['managepanel']['nullpanel'] ?? "❌ پنل مورد نظر یافت نشد.";
+        sendmessage($from_id, $notFoundMessage, $json_list_marzban_panel, 'HTML');
+        return;
+    }
     if ($marzban_list_get['type'] == "marzban") {
         $Check_token = token_panel($marzban_list_get['code_panel'], false);
         if (isset($Check_token['access_token'])) {
             $System_Stats = Get_System_Stats($text);
             if ($new_marzban) {
-                $active_users = $System_Stats['active_users'];
+                $active_users = $System_Stats['active_users']
+                    ?? $System_Stats['users_active']
+                    ?? $System_Stats['online_users']
+                    ?? 0;
             } else {
-                $active_users = $System_Stats['users_active'];
+                $active_users = $System_Stats['users_active']
+                    ?? $System_Stats['active_users']
+                    ?? $System_Stats['online_users']
+                    ?? 0;
             }
             $total_user = $System_Stats['total_user'];
             $mem_total = formatBytes($System_Stats['mem_total']);
@@ -4122,29 +4843,39 @@ $text_expie_agent
             $text_marzban = "❌ نام کاربری یا رمز عبور پنل اشتباه است";
             sendmessage($from_id, $text_marzban, $optionMarzban, 'HTML');
         } else {
-            $text_marzban = $textbotlang['Admin']['managepanel']['errorstateuspanel'] . json_encode($Check_token);
+            $errorDetails = json_encode($Check_token, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $text_marzban = $textbotlang['Admin']['managepanel']['errorstateuspanel'];
+            if (!empty($errorDetails) && $errorDetails !== 'null') {
+                $text_marzban .= PHP_EOL . "علت خطا: {$errorDetails}";
+            }
             sendmessage($from_id, $text_marzban, $optionMarzban, 'HTML');
         }
     } elseif ($marzban_list_get['type'] == "x-ui_single") {
         $x_ui_check_connect = login($marzban_list_get['code_panel'], false);
         if ($x_ui_check_connect['success']) {
             sendmessage($from_id, $textbotlang['Admin']['managepanel']['connectx-ui'], $optionX_ui_single, 'HTML');
-        } elseif ($x_ui_check_connect['msg'] == "Invalid username or password.") {
+        } elseif (!empty($x_ui_check_connect['msg']) && $x_ui_check_connect['msg'] == "Invalid username or password.") {
             $text_marzban = "❌ نام کاربری یا رمز عبور پنل اشتباه است";
             sendmessage($from_id, $text_marzban, $optionX_ui_single, 'HTML');
         } else {
-            $text_marzban = $textbotlang['Admin']['managepanel']['errorstateuspanel'] . "علت خطا {$x_ui_check_connect['errror']}";
+            $text_marzban = $textbotlang['Admin']['managepanel']['errorstateuspanel'];
+            if (!empty($x_ui_check_connect['errror'])) {
+                $text_marzban .= PHP_EOL . "علت خطا: {$x_ui_check_connect['errror']}";
+            }
             sendmessage($from_id, $text_marzban, $optionX_ui_single, 'HTML');
         }
     } elseif ($marzban_list_get['type'] == "alireza_single") {
         $x_ui_check_connect = login($marzban_list_get['code_panel'], false);
         if ($x_ui_check_connect['success']) {
             sendmessage($from_id, $textbotlang['Admin']['managepanel']['connectx-ui'], $optionalireza_single, 'HTML');
-        } elseif ($x_ui_check_connect['msg'] == "The username or password is incorrect") {
+        } elseif (!empty($x_ui_check_connect['msg']) && $x_ui_check_connect['msg'] == "The username or password is incorrect") {
             $text_marzban = "❌ نام کاربری یا رمز عبور پنل اشتباه است";
             sendmessage($from_id, $text_marzban, $optionalireza_single, 'HTML');
         } else {
-            $text_marzban = $textbotlang['Admin']['managepanel']['errorstateuspanel'] . "علت خطا {$x_ui_check_connect['errror']}";
+            $text_marzban = $textbotlang['Admin']['managepanel']['errorstateuspanel'];
+            if (!empty($x_ui_check_connect['errror'])) {
+                $text_marzban .= PHP_EOL . "علت خطا: {$x_ui_check_connect['errror']}";
+            }
             sendmessage($from_id, $text_marzban, $optionalireza_single, 'HTML');
         }
     } elseif ($marzban_list_get['type'] == "hiddify") {
@@ -4160,7 +4891,18 @@ $text_expie_agent
             if (isset($System_Stats['stats'])) {
                 $mem_total = round($System_Stats['stats']['system']['ram_total'], 2);
                 $mem_used = round($System_Stats['stats']['system']['ram_used'], 2);
-                $bandwidth = formatBytes($System_Stats['outgoing_bandwidth'] + $System_Stats['incoming_bandwidth']);
+                $outgoingBandwidth = 0;
+                $incomingBandwidth = 0;
+
+                if (isset($System_Stats['outgoing_bandwidth']) || isset($System_Stats['incoming_bandwidth'])) {
+                    $outgoingBandwidth = (float) ($System_Stats['outgoing_bandwidth'] ?? 0);
+                    $incomingBandwidth = (float) ($System_Stats['incoming_bandwidth'] ?? 0);
+                } elseif (isset($System_Stats['stats']['outgoing_bandwidth']) || isset($System_Stats['stats']['incoming_bandwidth'])) {
+                    $outgoingBandwidth = (float) ($System_Stats['stats']['outgoing_bandwidth'] ?? 0);
+                    $incomingBandwidth = (float) ($System_Stats['stats']['incoming_bandwidth'] ?? 0);
+                }
+
+                $bandwidth = formatBytes($outgoingBandwidth + $incomingBandwidth);
                 $text_marzban = "
 آمار پنل شما👇:
                              
@@ -4320,32 +5062,16 @@ $text_expie_agent
     sendmessage($from_id, "📌 اگر پنل ثنایی هستید یک لینک ساب کاربر را از پنل کپی کرده سپس در این بخش ارسال کنید .بقیه پنل ها باید طبق ساختارش ارسال نمایید.", $backadmin, 'HTML');
     step('GeturlNewx', $from_id);
 } elseif ($user['step'] == "GeturlNewx") {
-    if (!filter_var($text, FILTER_VALIDATE_URL)) {
+    $inputLink = trim($text);
+    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    if ($typepanel['type'] !== "x-ui_single" && !filter_var($inputLink, FILTER_VALIDATE_URL)) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Invalid-domain'], $backadmin, 'HTML');
         return;
     }
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
-    if ($typepanel['type'] == "x-ui_single") {
-        $req = new CurlRequest($text);
-        $response = $req->get();
-        if ($response['status'] != 200) {
-            sendmessage($from_id, "لینک ساب فعال نمی باشد", null, 'HTML');
-            return;
-        } elseif (!empty($response['error'])) {
-            sendmessage($from_id, "لینک ساب فعال نمی باشد", null, 'HTML');
-            return;
-        }
-        $response = $response['body'];
-        if (isBase64($response)) {
-            $response = base64_decode($response);
-        }
-        $protocol = ['vmess', 'vless', 'trojan', 'ss'];
-        $sub_check = explode('://', $response)[0];
-        if (!in_array($sub_check, $protocol)) {
-            sendmessage($from_id, "لینک ساب نامعتبر می باشد", null, 'HTML');
-            return;
-        }
-        $text = dirname($text);
+    if ($typepanel['type'] === "x-ui_single") {
+        $text = normalizeXuiSingleSubscriptionBaseUrl($inputLink);
+    } else {
+        $text = $inputLink;
     }
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['ChangedurlPanel']);
     update("marzban_panel", "linksubx", $text, "name_panel", $user['Processing_value']);
@@ -4527,6 +5253,12 @@ $text_expie_agent
     ];
     $keyboardlists['inline_keyboard'][] = $backbtn;
     $keyboardlists['inline_keyboard'][] = $pagination_buttons;
+    $keyboardlists['inline_keyboard'][] = [
+        [
+            'text' => '❌ بستن',
+            'callback_data' => 'close_listusers'
+        ]
+    ];
     $keyboard_json = json_encode($keyboardlists);
     Editmessagetext($from_id, $message_id, $textbotlang['Admin']['ManageUser']['mangebtnuserdec'], $keyboard_json);
 } elseif ($datain == 'next_pageuser') {
@@ -4576,6 +5308,12 @@ $text_expie_agent
         ]
     ];
     $keyboardlists['inline_keyboard'][] = $pagination_buttons;
+    $keyboardlists['inline_keyboard'][] = [
+        [
+            'text' => '❌ بستن',
+            'callback_data' => 'close_listusers'
+        ]
+    ];
     $keyboard_json = json_encode($keyboardlists);
     update("user", "pagenumber", $next_page, "id", $from_id);
     Editmessagetext($from_id, $message_id, $textbotlang['Admin']['ManageUser']['mangebtnuserdec'], $keyboard_json);
@@ -4624,9 +5362,17 @@ $text_expie_agent
         ]
     ];
     $keyboardlists['inline_keyboard'][] = $pagination_buttons;
+    $keyboardlists['inline_keyboard'][] = [
+        [
+            'text' => '❌ بستن',
+            'callback_data' => 'close_listusers'
+        ]
+    ];
     $keyboard_json = json_encode($keyboardlists);
     update("user", "pagenumber", $next_page, "id", $from_id);
     Editmessagetext($from_id, $message_id, $textbotlang['Admin']['ManageUser']['mangebtnuserdec'], $keyboard_json);
+} elseif ($datain == 'close_listusers') {
+    deletemessage($from_id, $message_id);
 } elseif ($datain == "agentlistusers") {
     $keyboardtypelistuser = json_encode([
         'inline_keyboard' => [
@@ -6000,13 +6746,12 @@ n2", $backadmin, 'HTML');
         $dateTime->setTimezone(new DateTimeZone('Asia/Tehran'));
         $lastupdate = jdate('Y/m/d H:i:s', $dateTime->getTimestamp());
     }
-    if ($DataUserOut['data_limit'] != null && $DataUserOut['used_traffic'] != null) {
-        $Percent = ($DataUserOut['data_limit'] - $DataUserOut['used_traffic']) * 100 / $DataUserOut['data_limit'];
-    } else {
-        $Percent = "100";
+    $limitValue = isset($DataUserOut['data_limit']) ? (float) $DataUserOut['data_limit'] : 0;
+    $usedTrafficValue = isset($DataUserOut['used_traffic']) ? (float) $DataUserOut['used_traffic'] : 0;
+    $Percent = safe_divide(($limitValue - $usedTrafficValue) * 100, $limitValue, 100);
+    if ($Percent < 0) {
+        $Percent = -$Percent;
     }
-    if ($Percent < 0)
-        $Percent = -($Percent);
     $Percent = round($Percent, 2);
     $text_order .= "
   
@@ -6068,54 +6813,76 @@ n2", $backadmin, 'HTML');
     }
     step('home', $from_id);
 } elseif ($text == "🛒 وضعیت قابلیت های فروشگاه" && $adminrulecheck['rule'] == "administrator") {
-    $marzbanstatusextra = select("shopSetting", "*", "Namevalue", "statusextra", "select")['value'];
-    $marzbandirectpay = select("shopSetting", "*", "Namevalue", "statusdirectpabuy", "select")['value'];
-    $statustimeextra = select("shopSetting", "*", "Namevalue", "statustimeextra", "select")['value'];
-    $statusdisorder = select("shopSetting", "*", "Namevalue", "statusdisorder", "select")['value'];
-    $statuschangeservice = select("shopSetting", "*", "Namevalue", "statuschangeservice", "select")['value'];
-    $statusshowprice = select("shopSetting", "*", "Namevalue", "statusshowprice", "select")['value'];
-    $statusshowconfig = select("shopSetting", "*", "Namevalue", "configshow", "select")['value'];
-    $statusremoveserveice = select("shopSetting", "*", "Namevalue", "backserviecstatus", "select")['value'];
+    $setting = select("setting", "*", null, null, "select") ?? [];
+
+    $marzbanstatusextraRow = select("shopSetting", "*", "Namevalue", "statusextra", "select") ?? [];
+    $marzbandirectpayRow = select("shopSetting", "*", "Namevalue", "statusdirectpabuy", "select") ?? [];
+    $statustimeextraRow = select("shopSetting", "*", "Namevalue", "statustimeextra", "select") ?? [];
+    $statusdisorderRow = select("shopSetting", "*", "Namevalue", "statusdisorder", "select") ?? [];
+    $statuschangeserviceRow = select("shopSetting", "*", "Namevalue", "statuschangeservice", "select") ?? [];
+    $statusshowpriceRow = select("shopSetting", "*", "Namevalue", "statusshowprice", "select") ?? [];
+    $statusshowconfigRow = select("shopSetting", "*", "Namevalue", "configshow", "select") ?? [];
+    $statusremoveserveiceRow = select("shopSetting", "*", "Namevalue", "backserviecstatus", "select") ?? [];
+
+    $marzbanstatusextra = $marzbanstatusextraRow['value'] ?? 'offextra';
+    $marzbandirectpay = $marzbandirectpayRow['value'] ?? 'offdirectbuy';
+    $statustimeextra = $statustimeextraRow['value'] ?? 'offtimeextraa';
+    $statusdisorder = $statusdisorderRow['value'] ?? 'offdisorder';
+    $statuschangeservice = $statuschangeserviceRow['value'] ?? 'offstatus';
+    $statusshowprice = $statusshowpriceRow['value'] ?? 'offshowprice';
+    $statusshowconfig = $statusshowconfigRow['value'] ?? 'offconfig';
+    $statusremoveserveice = $statusremoveserveiceRow['value'] ?? 'off';
+
+    $categoryStatusGeneralKey = $setting['statuscategorygenral'] ?? 'offcategorys';
+    if (!in_array($categoryStatusGeneralKey, ['oncategorys', 'offcategorys'], true)) {
+        $categoryStatusGeneralKey = 'offcategorys';
+    }
+
+    $categoryStatusKey = $setting['statuscategory'] ?? 'offcategory';
+    if (!in_array($categoryStatusKey, ['oncategory', 'offcategory'], true)) {
+        $categoryStatusKey = 'offcategory';
+    }
+
     $name_status_extra_Vloume = [
         'onextra' => $textbotlang['Admin']['Status']['statuson'],
         'offextra' => $textbotlang['Admin']['Status']['statusoff']
-    ][$marzbanstatusextra];
+    ][$marzbanstatusextra] ?? $textbotlang['Admin']['Status']['statusoff'];
     $name_status_paydirect = [
         'ondirectbuy' => $textbotlang['Admin']['Status']['statuson'],
         'offdirectbuy' => $textbotlang['Admin']['Status']['statusoff']
-    ][$marzbandirectpay];
+    ][$marzbandirectpay] ?? $textbotlang['Admin']['Status']['statusoff'];
     $name_status_timeextra = [
         'ontimeextraa' => $textbotlang['Admin']['Status']['statuson'],
         'offtimeextraa' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statustimeextra];
+    ][$statustimeextra] ?? $textbotlang['Admin']['Status']['statusoff'];
     $name_status_disorder = [
         'ondisorder' => $textbotlang['Admin']['Status']['statuson'],
         'offdisorder' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statusdisorder];
+    ][$statusdisorder] ?? $textbotlang['Admin']['Status']['statusoff'];
     $categorygenral = [
         'oncategorys' => $textbotlang['Admin']['Status']['statuson'],
         'offcategorys' => $textbotlang['Admin']['Status']['statusoff']
-    ][$setting['statuscategorygenral']];
+    ][$categoryStatusGeneralKey];
     $statustextchange = [
         'onstatus' => $textbotlang['Admin']['Status']['statuson'],
         'offstatus' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statuschangeservice];
+    ][$statuschangeservice] ?? $textbotlang['Admin']['Status']['statusoff'];
     $statusshowpricestext = [
         'onshowprice' => $textbotlang['Admin']['Status']['statuson'],
         'offshowprice' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statusshowprice];
+    ][$statusshowprice] ?? $textbotlang['Admin']['Status']['statusoff'];
     $statusshowconfigtext = [
         'onconfig' => $textbotlang['Admin']['Status']['statuson'],
         'offconfig' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statusshowconfig];
+    ][$statusshowconfig] ?? $textbotlang['Admin']['Status']['statusoff'];
     $statusbackremovetext = [
         'on' => $textbotlang['Admin']['Status']['statuson'],
         'off' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statusremoveserveice];
+    ][$statusremoveserveice] ?? $textbotlang['Admin']['Status']['statusoff'];
     $name_status_categorytime = [
         'oncategory' => $textbotlang['Admin']['Status']['statuson'],
         'offcategory' => $textbotlang['Admin']['Status']['statusoff']
-    ][$setting['statuscategory']];
+    ][$categoryStatusKey];
     $Bot_Status = json_encode([
         'inline_keyboard' => [
             [
@@ -6161,6 +6928,9 @@ n2", $backadmin, 'HTML');
             [
                 ['text' => $statusbackremovetext, 'callback_data' => "editshops-removeservicebackbtn-" . $statusremoveserveice],
                 ['text' => "💎 دکمه بازگشت وجه", 'callback_data' => "removeservicebackbtn"],
+            ],
+            [
+                ['text' => "❌ بستن", 'callback_data' => 'close_stat']
             ],
         ]
     ]);
@@ -6239,55 +7009,76 @@ n2", $backadmin, 'HTML');
         }
         update("setting", "statuscategory", $valuenew);
     }
-    $setting = select("setting", "*", null, null, "select");
-    $marzbanstatusextra = select("shopSetting", "*", "Namevalue", "statusextra", "select")['value'];
-    $marzbandirectpay = select("shopSetting", "*", "Namevalue", "statusdirectpabuy", "select")['value'];
-    $statustimeextra = select("shopSetting", "*", "Namevalue", "statustimeextra", "select")['value'];
-    $statusdisorder = select("shopSetting", "*", "Namevalue", "statusdisorder", "select")['value'];
-    $statuschangeservice = select("shopSetting", "*", "Namevalue", "statuschangeservice", "select")['value'];
-    $statusshowprice = select("shopSetting", "*", "Namevalue", "statusshowprice", "select")['value'];
-    $statusshowconfig = select("shopSetting", "*", "Namevalue", "configshow", "select")['value'];
-    $statusremoveserveice = select("shopSetting", "*", "Namevalue", "backserviecstatus", "select")['value'];
+    $setting = select("setting", "*", null, null, "select") ?? [];
+
+    $marzbanstatusextraRow = select("shopSetting", "*", "Namevalue", "statusextra", "select") ?? [];
+    $marzbandirectpayRow = select("shopSetting", "*", "Namevalue", "statusdirectpabuy", "select") ?? [];
+    $statustimeextraRow = select("shopSetting", "*", "Namevalue", "statustimeextra", "select") ?? [];
+    $statusdisorderRow = select("shopSetting", "*", "Namevalue", "statusdisorder", "select") ?? [];
+    $statuschangeserviceRow = select("shopSetting", "*", "Namevalue", "statuschangeservice", "select") ?? [];
+    $statusshowpriceRow = select("shopSetting", "*", "Namevalue", "statusshowprice", "select") ?? [];
+    $statusshowconfigRow = select("shopSetting", "*", "Namevalue", "configshow", "select") ?? [];
+    $statusremoveserveiceRow = select("shopSetting", "*", "Namevalue", "backserviecstatus", "select") ?? [];
+
+    $marzbanstatusextra = $marzbanstatusextraRow['value'] ?? 'offextra';
+    $marzbandirectpay = $marzbandirectpayRow['value'] ?? 'offdirectbuy';
+    $statustimeextra = $statustimeextraRow['value'] ?? 'offtimeextraa';
+    $statusdisorder = $statusdisorderRow['value'] ?? 'offdisorder';
+    $statuschangeservice = $statuschangeserviceRow['value'] ?? 'offstatus';
+    $statusshowprice = $statusshowpriceRow['value'] ?? 'offshowprice';
+    $statusshowconfig = $statusshowconfigRow['value'] ?? 'offconfig';
+    $statusremoveserveice = $statusremoveserveiceRow['value'] ?? 'off';
+
+    $categoryStatusGeneralKey = $setting['statuscategorygenral'] ?? 'offcategorys';
+    if (!in_array($categoryStatusGeneralKey, ['oncategorys', 'offcategorys'], true)) {
+        $categoryStatusGeneralKey = 'offcategorys';
+    }
+
+    $categoryStatusKey = $setting['statuscategory'] ?? 'offcategory';
+    if (!in_array($categoryStatusKey, ['oncategory', 'offcategory'], true)) {
+        $categoryStatusKey = 'offcategory';
+    }
+
     $name_status_extra_Vloume = [
         'onextra' => $textbotlang['Admin']['Status']['statuson'],
         'offextra' => $textbotlang['Admin']['Status']['statusoff']
-    ][$marzbanstatusextra];
+    ][$marzbanstatusextra] ?? $textbotlang['Admin']['Status']['statusoff'];
     $name_status_paydirect = [
         'ondirectbuy' => $textbotlang['Admin']['Status']['statuson'],
         'offdirectbuy' => $textbotlang['Admin']['Status']['statusoff']
-    ][$marzbandirectpay];
+    ][$marzbandirectpay] ?? $textbotlang['Admin']['Status']['statusoff'];
     $name_status_timeextra = [
         'ontimeextraa' => $textbotlang['Admin']['Status']['statuson'],
         'offtimeextraa' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statustimeextra];
+    ][$statustimeextra] ?? $textbotlang['Admin']['Status']['statusoff'];
     $name_status_disorder = [
         'ondisorder' => $textbotlang['Admin']['Status']['statuson'],
         'offdisorder' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statusdisorder];
+    ][$statusdisorder] ?? $textbotlang['Admin']['Status']['statusoff'];
     $categorygenral = [
         'oncategorys' => $textbotlang['Admin']['Status']['statuson'],
         'offcategorys' => $textbotlang['Admin']['Status']['statusoff']
-    ][$setting['statuscategorygenral']];
+    ][$categoryStatusGeneralKey];
     $statustextchange = [
         'onstatus' => $textbotlang['Admin']['Status']['statuson'],
         'offstatus' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statuschangeservice];
+    ][$statuschangeservice] ?? $textbotlang['Admin']['Status']['statusoff'];
     $statusshowpricestext = [
         'onshowprice' => $textbotlang['Admin']['Status']['statuson'],
         'offshowprice' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statusshowprice];
+    ][$statusshowprice] ?? $textbotlang['Admin']['Status']['statusoff'];
     $statusshowconfigtext = [
         'onconfig' => $textbotlang['Admin']['Status']['statuson'],
         'offconfig' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statusshowconfig];
+    ][$statusshowconfig] ?? $textbotlang['Admin']['Status']['statusoff'];
     $statusbackremovetext = [
         'on' => $textbotlang['Admin']['Status']['statuson'],
         'off' => $textbotlang['Admin']['Status']['statusoff']
-    ][$statusremoveserveice];
+    ][$statusremoveserveice] ?? $textbotlang['Admin']['Status']['statusoff'];
     $name_status_categorytime = [
         'oncategory' => $textbotlang['Admin']['Status']['statuson'],
         'offcategory' => $textbotlang['Admin']['Status']['statusoff']
-    ][$setting['statuscategory']];
+    ][$categoryStatusKey];
     $Bot_Status = json_encode([
         'inline_keyboard' => [
             [
@@ -6333,6 +7124,9 @@ n2", $backadmin, 'HTML');
             [
                 ['text' => $statusbackremovetext, 'callback_data' => "editshops-removeservicebackbtn-" . $statusremoveserveice],
                 ['text' => "💎 دکمه بازگشت وجه", 'callback_data' => "removeservicebackbtn"],
+            ],
+            [
+                ['text' => "❌ بستن", 'callback_data' => 'close_stat']
             ],
         ]
     ]);
@@ -6501,17 +7295,35 @@ n2", $backadmin, 'HTML');
     if ($DataUserOut['status'] == "on_hold") {
         $pricelast = $invoice['price_product'];
     } elseif ($DataUserOut['data_limit'] == null) {
-        $pricetime = ($nameloc['price_product'] / $nameloc['Service_time']) + intval($sumproduct['SUM(price)']);
-        $pricelast = (($DataUserOut['expire'] - time()) / 86400) * $pricetime;
+        $serviceTime = (float) ($nameloc['Service_time'] ?? 0);
+        if ($serviceTime > 0) {
+            $pricetime = safe_divide($nameloc['price_product'], $serviceTime, 0) + intval($sumproduct['SUM(price)']);
+            $pricelast = (($DataUserOut['expire'] - time()) / 86400) * $pricetime;
+        } else {
+            $pricelast = 0;
+        }
     } elseif ($DataUserOut['expire'] == null) {
-        $volumelefts = ($DataUserOut['data_limit'] - $DataUserOut['used_traffic']) / pow(1024, 3);
-        $volumeleft = $volumelefts / ($DataUserOut['data_limit'] / pow(1024, 3));
-        $pricelast = round($volumeleft * ($nameloc['price_product'] + intval($sumproduct['SUM(price)'])), 2);
+        $dataLimit = isset($DataUserOut['data_limit']) ? (float) $DataUserOut['data_limit'] : 0;
+        if ($dataLimit > 0) {
+            $volumelefts = ($dataLimit - (float) ($DataUserOut['used_traffic'] ?? 0)) / pow(1024, 3);
+            $volumeDivisor = $dataLimit / pow(1024, 3);
+            $volumeleft = $volumeDivisor > 0 ? safe_divide($volumelefts, $volumeDivisor, 0) : 0;
+            $pricelast = round($volumeleft * ($nameloc['price_product'] + intval($sumproduct['SUM(price)'])), 2);
+        } else {
+            $pricelast = 0;
+        }
     } else {
-        $timeleft = (round(($DataUserOut['expire'] - time()) / 86400, 0)) / $nameloc['Service_time'];
-        $volumelefts = ($DataUserOut['data_limit'] - $DataUserOut['used_traffic']) / pow(1024, 3);
-        $volumeleft = $volumelefts / ($DataUserOut['data_limit'] / pow(1024, 3));
-        $pricelast = round($timeleft * $volumeleft * ($nameloc['price_product'] + intval($sumproduct['SUM(price)'])), 2);
+        $serviceTime = (float) ($nameloc['Service_time'] ?? 0);
+        $dataLimit = isset($DataUserOut['data_limit']) ? (float) $DataUserOut['data_limit'] : 0;
+        $volumeDivisor = $dataLimit / pow(1024, 3);
+        if ($serviceTime > 0 && $volumeDivisor > 0) {
+            $timeleft = safe_divide(round(($DataUserOut['expire'] - time()) / 86400, 0), $serviceTime, 0);
+            $volumelefts = ($dataLimit - (float) ($DataUserOut['used_traffic'] ?? 0)) / pow(1024, 3);
+            $volumeleft = safe_divide($volumelefts, $volumeDivisor, 0);
+            $pricelast = round($timeleft * $volumeleft * ($nameloc['price_product'] + intval($sumproduct['SUM(price)'])), 2);
+        } else {
+            $pricelast = 0;
+        }
     }
     $pricelast = intval($pricelast);
     if (intval($pricelast) != 0) {
@@ -6623,16 +7435,25 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     sendmessage($from_id, $textbotlang['Admin']['cronjob']['changeddata'], $setting_panel, 'HTML');
     step("home", $from_id);
     update("setting", "removedayc", $text);
-} elseif ($text == "تنظیم آدرس api" && $adminrulecheck['rule'] == "administrator") {
+} elseif ($text == "🌐 ثبت آدرس API ترنادو" && $adminrulecheck['rule'] == "administrator") {
     $PaySetting = select("PaySetting", "ValuePay", "NamePay", "urlpaymenttron", "select");
-    $texttronseller = "📌 آدرس api را ارسال نمایید.
-
-آدرس فعلی: {$PaySetting['ValuePay']}";
+    $currentUrl = is_array($PaySetting) && isset($PaySetting['ValuePay']) ? $PaySetting['ValuePay'] : 'تنظیم نشده';
+    $recommendedUrl = (defined('TRONADO_ORDER_TOKEN_ENDPOINTS') && isset(TRONADO_ORDER_TOKEN_ENDPOINTS[0]))
+        ? TRONADO_ORDER_TOKEN_ENDPOINTS[0]
+        : 'https://bot.tronado.cloud/api/v1/Order/GetOrderToken';
+    $texttronseller = "🌐 آدرس API مورد استفاده برای اتصال به ترنادو را ارسال کنید.\n\nآدرس فعلی: {$currentUrl}\n\nℹ️ پیشنهاد ویژه برای ترنادو:\n{$recommendedUrl}";
     sendmessage($from_id, $texttronseller, $backadmin, 'HTML');
     step('urlpaymenttron', $from_id);
 } elseif ($user['step'] == "urlpaymenttron") {
+    $submittedUrl = trim($text);
+    $oldDomain = 'tronseller.storeddownloader.fun';
+    if (stripos($submittedUrl, $oldDomain) !== false) {
+        $warningMessage = "⚠️ دامنه قدیمی ترنادو هنوز استفاده می‌شود. لطفاً آدرس جدید را وارد کنید.";
+        sendmessage($from_id, $warningMessage, $backadmin, 'HTML');
+        return;
+    }
     sendmessage($from_id, $textbotlang['Admin']['SettingnowPayment']['Savaapi'], $trnado, 'HTML');
-    update("PaySetting", "ValuePay", $text, "NamePay", "urlpaymenttron");
+    update("PaySetting", "ValuePay", $submittedUrl, "NamePay", "urlpaymenttron");
     step('home', $from_id);
 } elseif ($text == "✏️ ویرایش آموزش" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['Help']['SelectName'], $json_list_helpkey, 'HTML');
@@ -6898,9 +7719,7 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     $textcreatuser = str_replace('{location}', $marzban_list_get['name_panel'], $textcreatuser);
     $textcreatuser = str_replace('{day}', $info_product['Service_time'], $textcreatuser);
     $textcreatuser = str_replace('{volume}', $info_product['Volume_constraint'], $textcreatuser);
-    $textcreatuser = str_replace('{config}', "<code>{$output_config_link}</code>", $textcreatuser);
-    $textcreatuser = str_replace('{links}', $config, $textcreatuser);
-    $textcreatuser = str_replace('{links2}', $output_config_link, $textcreatuser);
+    $textcreatuser = applyConnectionPlaceholders($textcreatuser, $output_config_link, $config);
     if (intval($info_product['Volume_constraint']) == 0) {
         $textcreatuser = str_replace('گیگابایت', "", $textcreatuser);
     }
@@ -6943,10 +7762,17 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
 } elseif (preg_match('/rejectrequesta_(\w+)/', $datain, $datagetr)) {
     $id_user = $datagetr[1];
     $request_agent = select("Requestagent", "*", "id", $id_user, "select");
-    update("Requestagent", "status", "reject", "id", $id_user);
-    $userinfo = select("user", "*", "id", $id_user, "select");
-    $Balancenew = $userinfo['Balance'] + intval($setting['agentreqprice']);
-    update("user", "Balance", $Balancenew, "id", $id_user);
+
+    if (!$request_agent) {
+        telegram('answerCallbackQuery', array(
+            'callback_query_id' => $callback_query_id,
+            'text' => "درخواست مورد نظر یافت نشد.",
+            'show_alert' => true,
+            'cache_time' => 5,
+        ));
+        return;
+    }
+
     if ($request_agent['status'] == "reject" || $request_agent['status'] == "accept") {
         telegram('answerCallbackQuery', array(
             'callback_query_id' => $callback_query_id,
@@ -6956,6 +7782,43 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         ));
         return;
     }
+
+    try {
+        $pdo->beginTransaction();
+
+        $stmt = $pdo->prepare("UPDATE Requestagent SET status = :status, type = :type WHERE id = :id AND status = :expected_status");
+        $stmt->execute([
+            ':status' => 'reject',
+            ':type' => 'None',
+            ':id' => $id_user,
+            ':expected_status' => 'waiting',
+        ]);
+
+        if ($stmt->rowCount() === 0) {
+            $pdo->rollBack();
+            telegram('answerCallbackQuery', array(
+                'callback_query_id' => $callback_query_id,
+                'text' => "این درخواست توسط ادمین دیگری بررسی شده است",
+                'show_alert' => true,
+                'cache_time' => 5,
+            ));
+            return;
+        }
+
+        $stmtBalance = $pdo->prepare("UPDATE user SET Balance = Balance + :amount WHERE id = :id");
+        $stmtBalance->execute([
+            ':amount' => intval($setting['agentreqprice']),
+            ':id' => $id_user,
+        ]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
     $keyboardreject = json_encode([
         'inline_keyboard' => [
             [['text' => "✅درخواست رد شده.", 'callback_data' => "reject"]],
@@ -6963,17 +7826,27 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     ]);
     sendmessage($from_id, "✅ درخواست با موفقیت رد گردید.", null, 'HTML');
     sendmessage($id_user, "❌ کاربر گرامی درخواست نمایندگی شما رد گردید.", null, 'HTML');
-    $textrequestagent = "📣 یک کاربر درخواست نمایندگی ثبت کرده لطفا اطلاعات را بررسی و وضعیت را مشخص کنید.
-
-آیدی عددی : $id_user
-نام کاربری : {$request_agent['username']} 
-توضیحات :  {$request_agent['Description']} ";
+    $textrequestagent = "📣 یک کاربر درخواست نمایندگی ثبت کرده لطفا اطلاعات را بررسی و وضعیت را مشخص کنید.\n\nآیدی عددی : $id_user\nنام کاربری : {$request_agent['username']}\nتوضیحات :  {$request_agent['Description']} ";
+    $textrequestagent .= "\nوضعیت: رد شد.";
     Editmessagetext($from_id, $message_id, $textrequestagent, $keyboardreject);
+    telegram('answerCallbackQuery', array(
+        'callback_query_id' => $callback_query_id,
+        'text' => "درخواست با موفقیت رد شد.",
+        'show_alert' => false,
+        'cache_time' => 5,
+    ));
 } elseif (preg_match('/addagentrequest_(\w+)/', $datain, $datagetr)) {
     $id_user = $datagetr[1];
     $request_agent = select("Requestagent", "*", "id", $id_user, "select");
-    update("Requestagent", "status", "accept", "id", $id_user);
-    update("user", "Processing_value", $id_user, "id", $from_id);
+    if (!$request_agent) {
+        telegram('answerCallbackQuery', array(
+            'callback_query_id' => $callback_query_id,
+            'text' => "درخواست مورد نظر یافت نشد.",
+            'show_alert' => true,
+            'cache_time' => 5,
+        ));
+        return;
+    }
     if ($request_agent['status'] == "reject" || $request_agent['status'] == "accept") {
         telegram('answerCallbackQuery', array(
             'callback_query_id' => $callback_query_id,
@@ -6983,34 +7856,123 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         ));
         return;
     }
+    $defaultAgentType = 'n';
+    $agentTypeLabels = [
+        'n' => 'نماینده عادی',
+        'n2' => 'نماینده پیشرفته',
+    ];
+
+    try {
+        $pdo->beginTransaction();
+
+        $stmt = $pdo->prepare("UPDATE Requestagent SET status = :status, type = :type WHERE id = :id AND status = :expected_status");
+        $stmt->execute([
+            ':status' => 'accept',
+            ':type' => $defaultAgentType,
+            ':id' => $id_user,
+            ':expected_status' => 'waiting',
+        ]);
+
+        if ($stmt->rowCount() === 0) {
+            $pdo->rollBack();
+            telegram('answerCallbackQuery', array(
+                'callback_query_id' => $callback_query_id,
+                'text' => "این درخواست توسط ادمین دیگری بررسی شده است",
+                'show_alert' => true,
+                'cache_time' => 5,
+            ));
+            return;
+        }
+
+        $stmtUser = $pdo->prepare("UPDATE user SET agent = :agent, expire = NULL WHERE id = :id");
+        $stmtUser->execute([
+            ':agent' => $defaultAgentType,
+            ':id' => $id_user,
+        ]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    sendmessage($id_user, "✅ کاربر گرامی با درخواست نمایندگی شما موافقت و شما نماینده شدید.", null, 'HTML');
+    sendmessage($from_id, $textbotlang['Admin']['agent']['useragented'], $keyboardadmin, 'HTML');
+    $agentTypeButtons = [];
+    foreach ($agentTypeLabels as $typeCode => $label) {
+        $buttonText = ($typeCode === $defaultAgentType ? "✅ " : "") . $label;
+        $agentTypeButtons[] = [
+            'text' => $buttonText,
+            'callback_data' => "setagenttype_{$typeCode}_{$id_user}"
+        ];
+    }
     $keyboardreject = json_encode([
         'inline_keyboard' => [
             [['text' => "✅درخواست تایید شده.", 'callback_data' => "accept"]],
+            $agentTypeButtons,
             [['text' => "⏱️ زمان انقضا نمایندگی", 'callback_data' => 'expireset_' . $id_user]],
             [['text' => "مدیریت کاربر", 'callback_data' => 'manageuser_' . $id_user]]
         ]
-    ]);
-    sendmessage($from_id, "📌 نوع کاربری را ارسال نمایید.", $backuser, 'HTML');
-    sendmessage($id_user, "✅ کاربر گرامی با درخواست نمایندگی شما موافقت و شما نماینده شدید.", null, 'HTML');
-    $textrequestagent = "📣 یک کاربر درخواست نمایندگی ثبت کرده لطفا اطلاعات را بررسی و وضعیت را مشخص کنید.
-
-آیدی عددی : $id_user
-نام کاربری : {$request_agent['username']} 
-توضیحات :  {$request_agent['Description']} ";
+    ], JSON_UNESCAPED_UNICODE);
+    $textrequestagent = "📣 یک کاربر درخواست نمایندگی ثبت کرده لطفا اطلاعات را بررسی و وضعیت را مشخص کنید.\n\nآیدی عددی : $id_user\nنام کاربری : {$request_agent['username']}\nتوضیحات :  {$request_agent['Description']} ";
+    $textrequestagent .= "\nوضعیت: تایید شد ({$agentTypeLabels[$defaultAgentType]})";
+    $textrequestagent .= "\nبرای تغییر نوع نماینده از دکمه‌های زیر استفاده کنید.";
     Editmessagetext($from_id, $message_id, $textrequestagent, $keyboardreject);
-    step("typeagent", $from_id);
-} elseif ($user['step'] == "typeagent") {
-    $agentst = ["n", "n2"];
-    $text = strtolower($text);
-    if (!in_array($text, $agentst)) {
-        sendmessage($from_id, $textbotlang['Admin']['agent']['invalidtypeagent'], $backadmin, 'HTML');
+    telegram('answerCallbackQuery', array(
+        'callback_query_id' => $callback_query_id,
+        'text' => "درخواست تایید شد و نماینده عادی فعال شد.",
+        'show_alert' => false,
+        'cache_time' => 5,
+    ));
+} elseif (preg_match('/^setagenttype_(n|n2)_(\w+)/', $datain, $datagetr)) {
+    $selectedType = $datagetr[1];
+    $id_user = $datagetr[2];
+    $agentTypeLabels = [
+        'n' => 'نماینده عادی',
+        'n2' => 'نماینده پیشرفته',
+    ];
+    if (!array_key_exists($selectedType, $agentTypeLabels)) {
+        telegram('answerCallbackQuery', array(
+            'callback_query_id' => $callback_query_id,
+            'text' => $textbotlang['Admin']['agent']['invalidtypeagent'],
+            'show_alert' => true,
+            'cache_time' => 5,
+        ));
         return;
     }
-    $id_user = $user['Processing_value'];
-    update("user", "agent", $text, "id", $id_user);
-    update("Requestagent", "type", $text, "id", $id_user);
-    step("home", $from_id);
-    sendmessage($from_id, "✅ کاربر با موفقیت نماینده گردید.", $keyboardadmin, 'HTML');
+    update("user", "agent", $selectedType, "id", $id_user);
+    update("Requestagent", "type", $selectedType, "id", $id_user);
+    $request_agent = select("Requestagent", "*", "id", $id_user, "select");
+    if ($request_agent) {
+        $agentTypeButtons = [];
+        foreach ($agentTypeLabels as $typeCode => $label) {
+            $buttonText = ($typeCode === $selectedType ? "✅ " : "") . $label;
+            $agentTypeButtons[] = [
+                'text' => $buttonText,
+                'callback_data' => "setagenttype_{$typeCode}_{$id_user}"
+            ];
+        }
+        $keyboardreject = json_encode([
+            'inline_keyboard' => [
+                [['text' => "✅درخواست تایید شده.", 'callback_data' => "accept"]],
+                $agentTypeButtons,
+                [['text' => "⏱️ زمان انقضا نمایندگی", 'callback_data' => 'expireset_' . $id_user]],
+                [['text' => "مدیریت کاربر", 'callback_data' => 'manageuser_' . $id_user]]
+            ]
+        ], JSON_UNESCAPED_UNICODE);
+        $textrequestagent = "📣 یک کاربر درخواست نمایندگی ثبت کرده لطفا اطلاعات را بررسی و وضعیت را مشخص کنید.\n\nآیدی عددی : $id_user\nنام کاربری : {$request_agent['username']}\nتوضیحات :  {$request_agent['Description']} ";
+        $textrequestagent .= "\nوضعیت: تایید شد ({$agentTypeLabels[$selectedType]})";
+        $textrequestagent .= "\nبرای تغییر نوع نماینده از دکمه‌های زیر استفاده کنید.";
+        Editmessagetext($from_id, $message_id, $textrequestagent, $keyboardreject);
+    }
+    telegram('answerCallbackQuery', array(
+        'callback_query_id' => $callback_query_id,
+        'text' => "نوع نماینده به {$agentTypeLabels[$selectedType]} تغییر کرد.",
+        'show_alert' => false,
+        'cache_time' => 5,
+    ));
 } elseif ($datain == "iranpay2setting" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['users']['selectoption'], $trnado, 'HTML');
 } elseif ($datain == "iranpay3setting" && $adminrulecheck['rule'] == "administrator") {
@@ -7048,11 +8010,10 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         ]
     ]);
     Editmessagetext($from_id, $message_id, "روشن گردید", $statusternadoo);
-} elseif ($text == "API T" && $adminrulecheck['rule'] == "administrator") {
+} elseif ($text == "🔑 ثبت API Key ترنادو" && $adminrulecheck['rule'] == "administrator") {
     $PaySetting = select("PaySetting", "ValuePay", "NamePay", "apiternado", "select");
-    $texttronseller = "💳 مرچنت کد خود را دریافت و در این قسمت وارد کنید
-        
-مرچنت کد فعلی شما : {$PaySetting['ValuePay']}";
+    $currentKey = $PaySetting['ValuePay'] ?? 'ثبت نشده';
+    $texttronseller = "🔑 کلید API ترنادو خود را اینجا وارد کنید.\n\nکلید فعلی شما: {$currentKey}";
     sendmessage($from_id, $texttronseller, $backadmin, 'HTML');
     step('apiternado', $from_id);
 } elseif ($user['step'] == "apiternado") {
@@ -7110,8 +8071,9 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     sendmessage($from_id, "✅  متن با موفقیت تنظیم گردید.", $Swapinokey, 'HTML');
     update("textbot", "text", $text, "id_text", "text_star_telegram");
     step("home", $from_id);
-} elseif ($text == "🗂 نام درگاه ارزی ریالی دوم") {
-    sendmessage($from_id, " 📌 نام درگاه را ارسال نمايید", $backadmin, 'HTML');
+} elseif ($text == "🏷️ نام نمایشی درگاه ترنادو") {
+    $prompt = "🏷️ نام نمایشی دلخواه برای درگاه ترنادو را ارسال کنید.";
+    sendmessage($from_id, $prompt, $backadmin, 'HTML');
     step("gettextiranpay3", $from_id);
 } elseif ($user['step'] == "gettextiranpay3") {
     sendmessage($from_id, "✅  متن با موفقیت تنظیم گردید.", $trnado, 'HTML');
@@ -7190,6 +8152,183 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         ]
     ]);
     sendmessage($from_id, $textoptimize, $Response, 'HTML');
+} elseif ($text == "💀 بازنشانی ربات" && $adminrulecheck['rule'] == "administrator") {
+    global $adminnumber;
+    $mainAdminId = trim((string) ($adminnumber ?? ''));
+    $currentUserId = trim((string) $from_id);
+    if ($mainAdminId !== '' && $currentUserId !== $mainAdminId) {
+        sendmessage($from_id, "⚠️ فقط ادمین اصلی می‌تواند این بخش را مشاهده کند.", null, 'HTML');
+        return;
+    }
+    $resetWarning = "⚠️ هشدار مهم\n\nبا تایید بازنشانی، تمامی جداول پایگاه داده حذف و مجدداً ساخته خواهند شد. این عملیات غیرقابل بازگشت است.\n\nآیا از انجام این کار مطمئن هستید؟";
+    $resetKeyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "✅ بله، مطمئن هستم", 'callback_data' => 'resetbot_confirm'],
+                ['text' => "❌ خیر", 'callback_data' => 'resetbot_cancel'],
+            ],
+        ],
+    ], JSON_UNESCAPED_UNICODE);
+    sendmessage($from_id, $resetWarning, $resetKeyboard, 'HTML');
+} elseif ($datain == "resetbot_cancel") {
+    telegram('answerCallbackQuery', array(
+        'callback_query_id' => $callback_query_id,
+        'text' => "عملیات لغو شد.",
+        'show_alert' => false,
+        'cache_time' => 5,
+    ));
+    Editmessagetext($from_id, $message_id, "❌ عملیات بازنشانی لغو شد.", null);
+} elseif ($datain == "resetbot_confirm" && $adminrulecheck['rule'] == "administrator") {
+    global $pdo, $domainhosts, $adminnumber;
+    $mainAdminId = trim((string) ($adminnumber ?? ''));
+    $currentUserId = trim((string) $from_id);
+    if ($mainAdminId !== '' && $currentUserId !== $mainAdminId) {
+        telegram('answerCallbackQuery', array(
+            'callback_query_id' => $callback_query_id,
+            'text' => "❌ شما اجازه انجام این عملیات را ندارید.",
+            'show_alert' => true,
+            'cache_time' => 5,
+        ));
+        return;
+    }
+    telegram('answerCallbackQuery', array(
+        'callback_query_id' => $callback_query_id,
+        'text' => "⏳ در حال بازنشانی...",
+        'show_alert' => false,
+        'cache_time' => 5,
+    ));
+    Editmessagetext($from_id, $message_id, "⏳ عملیات بازنشانی ربات آغاز شد. لطفاً منتظر بمانید...", null);
+
+    $dropError = null;
+    try {
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 0;");
+        $tables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
+        if (!empty($tables)) {
+            foreach ($tables as $tableName) {
+                $tableName = trim($tableName);
+                if ($tableName !== '') {
+                    $pdo->exec("DROP TABLE IF EXISTS `{$tableName}`;");
+                }
+            }
+        }
+    } catch (Throwable $exception) {
+        $dropError = $exception;
+    } finally {
+        try {
+            $pdo->exec("SET FOREIGN_KEY_CHECKS = 1;");
+        } catch (Throwable $ignored) {
+        }
+    }
+
+    if ($dropError !== null) {
+        file_put_contents(__DIR__ . '/resetbot_error.log', '[' . date('Y-m-d H:i:s') . "] DROP ERROR: " . $dropError->getMessage() . PHP_EOL, FILE_APPEND);
+        Editmessagetext($from_id, $message_id, "❌ خطا در حذف جداول. لطفاً فایل resetbot_error.log را بررسی کنید.", null);
+        sendmessage($from_id, "❌ عملیات بازنشانی به دلیل خطا در حذف جداول متوقف شد.", null, 'HTML');
+        return;
+    }
+
+    $resetUrlUsed = '';
+    $reinstallSuccess = false;
+    $installerErrors = [];
+    $candidateUrls = [];
+    $normalizedHost = '';
+
+    if (!empty($domainhosts)) {
+        $normalizedHost = rtrim($domainhosts, '/');
+        $candidateUrls[] = "https://{$normalizedHost}/table.php";
+        $candidateUrls[] = "http://{$normalizedHost}/table.php";
+    }
+
+    $attemptInstallerRequest = function (string $url) use (&$resetUrlUsed, &$reinstallSuccess, &$installerErrors) {
+        if ($reinstallSuccess || $url === '') {
+            return;
+        }
+
+        $response = false;
+        $httpCode = null;
+
+        if (function_exists('curl_init')) {
+            $curlHandle = @curl_init($url);
+            if ($curlHandle !== false) {
+                curl_setopt_array($curlHandle, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 20,
+                    CURLOPT_CONNECTTIMEOUT => 10,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_SSL_VERIFYPEER => false,
+                    CURLOPT_SSL_VERIFYHOST => false,
+                ]);
+                $response = curl_exec($curlHandle);
+                if ($response === false) {
+                    $installerErrors[] = 'cURL error: ' . curl_error($curlHandle) . " ({$url})";
+                } else {
+                    $httpCode = curl_getinfo($curlHandle, CURLINFO_HTTP_CODE);
+                }
+                curl_close($curlHandle);
+            }
+        }
+
+        if ($response === false) {
+            $streamContext = stream_context_create([
+                'http' => [
+                    'timeout' => 20,
+                ],
+                'ssl' => [
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                ],
+            ]);
+            $response = @file_get_contents($url, false, $streamContext);
+            if ($response === false) {
+                $installerErrors[] = 'stream error: unable to fetch ' . $url;
+            } else {
+                $httpCode = 200;
+            }
+        }
+
+        if ($response !== false && ($httpCode === null || ($httpCode >= 200 && $httpCode < 400))) {
+            $resetUrlUsed = $url;
+            $reinstallSuccess = true;
+        }
+    };
+
+    foreach ($candidateUrls as $candidateUrl) {
+        $attemptInstallerRequest($candidateUrl);
+        if ($reinstallSuccess) {
+            break;
+        }
+    }
+
+    if (!$reinstallSuccess) {
+        $localTablePath = __DIR__ . '/table.php';
+        if (is_file($localTablePath)) {
+            try {
+                include $localTablePath;
+                $reinstallSuccess = true;
+                $resetUrlUsed = 'local include';
+            } catch (Throwable $tableError) {
+                $installerErrors[] = 'local table include: ' . $tableError->getMessage();
+                file_put_contents(__DIR__ . '/resetbot_error.log', '[' . date('Y-m-d H:i:s') . "] TABLE ERROR: " . $tableError->getMessage() . PHP_EOL, FILE_APPEND);
+                Editmessagetext($from_id, $message_id, "⚠️ جداول حذف شدند اما اجرای table.php با خطا مواجه شد.", null);
+                sendmessage($from_id, "⚠️ اجرای table.php با خطا مواجه شد. لطفاً فایل resetbot_error.log را بررسی کنید.", null, 'HTML');
+                return;
+            }
+        }
+    }
+
+    if ($reinstallSuccess) {
+        $successMessage = "✅ بازنشانی ربات با موفقیت انجام شد." . (!empty($resetUrlUsed) ? "\nمنبع اجرا: {$resetUrlUsed}" : '');
+        Editmessagetext($from_id, $message_id, $successMessage, null);
+        sendmessage($from_id, "✅ عملیات بازنشانی ربات با موفقیت انجام شد.", null, 'HTML');
+    } else {
+        if (!empty($installerErrors)) {
+            file_put_contents(__DIR__ . '/resetbot_error.log', '[' . date('Y-m-d H:i:s') . "] INSTALL ERROR: " . implode(' | ', $installerErrors) . PHP_EOL, FILE_APPEND);
+        }
+        $manualUrlHint = !empty($normalizedHost) ? "لطفاً لینک https://{$normalizedHost}/table.php را به صورت دستی باز کنید." : "لطفاً فایل table.php را به صورت دستی اجرا کنید.";
+        $warningText = "⚠️ جداول حذف شدند اما اجرای table.php انجام نشد. {$manualUrlHint}";
+        Editmessagetext($from_id, $message_id, $warningText, null);
+        sendmessage($from_id, $warningText, null, 'HTML');
+    }
 } elseif ($datain == "optimizebot") {
     $stmt = $pdo->prepare("SELECT * FROM invoice WHERE Status = 'unpaid' AND name_product != 'سرویس تست'");
     $stmt->execute();
@@ -7321,7 +8460,7 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         $randomString = bin2hex(random_bytes(5));
         $output_config_link = $panel['sublink'] == "onsublink" ? $dataoutput['subscription_url'] : "";
         $config = "";
-        if ($marzban_list_get['config'] == "onconfig" && is_array($dataoutput['configs'])) {
+        if ($panel['config'] == "onconfig" && is_array($dataoutput['configs'])) {
             foreach ($dataoutput['configs'] as $link) {
                 $config .= "\n" . $link;
             }
@@ -7336,9 +8475,7 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         $textcreatuser = str_replace('{location}', $panel['name_panel'], $textcreatuser);
         $textcreatuser = str_replace('{day}', $text, $textcreatuser);
         $textcreatuser = str_replace('{volume}', $user['Processing_value_tow'], $textcreatuser);
-        $textcreatuser = str_replace('{config}', $output_config_link, $textcreatuser);
-        $textcreatuser = str_replace('{links}', $config, $textcreatuser);
-        $textcreatuser = str_replace('{links2}', $output_config_link, $textcreatuser);
+        $textcreatuser = applyConnectionPlaceholders($textcreatuser, $output_config_link, $config);
         if ($panel['type'] == "Manualsale" || $panel['type'] == "ibsng" || $panel['type'] == "mikrotik") {
             $textcreatuser = str_replace('{password}', $dataoutput['subscription_url'], $textcreatuser);
             update("invoice", "user_info", $dataoutput['subscription_url'], "id_invoice", $randomString);
@@ -7365,6 +8502,58 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     }
     update("user", "Processing_value", $userdata['idpanel'], "id", $from_id);
     step("home", $from_id);
+} elseif ($text == "📑 نوع مرزبان" && $adminrulecheck['rule'] == "administrator") {
+    $configPath = __DIR__ . '/config.php';
+    $selectionMessage = buildPanelSelectionMessage($configPath);
+    $selectionKeyboard = getPanelSelectionKeyboard();
+    sendmessage($from_id, $selectionMessage, $selectionKeyboard, 'HTML');
+    step('home', $from_id);
+} elseif ($datain == "set_panel_pasargad" || $datain == "set_panel_marzban") {
+    if ($adminrulecheck['rule'] != "administrator") {
+        telegram('answerCallbackQuery', [
+            'callback_query_id' => $callback_query_id,
+            'text' => '❌ شما به این بخش دسترسی ندارید.',
+            'show_alert' => true,
+            'cache_time' => 5,
+        ]);
+        return;
+    }
+
+    $configPath = __DIR__ . '/config.php';
+    $desiredState = $datain == "set_panel_pasargad" ? 'pasargad' : 'marzban';
+
+    deletemessage($from_id, $message_id);
+
+    $updateResult = updatePanelStateInConfigFile($configPath, $desiredState);
+
+    if ($updateResult) {
+        $confirmationText = $desiredState === 'pasargad'
+            ? "✅ نوع پنل با موفقیت روی «پاسارگارد» تنظیم شد.\n🔹 نوع فعلی پنل: پاسارگارد"
+            : "✅ نوع پنل با موفقیت روی «مرزبان» تنظیم شد.\n🔹 نوع فعلی پنل: مرزبان";
+
+        sendmessage($from_id, $confirmationText, null, 'HTML');
+
+        telegram('answerCallbackQuery', [
+            'callback_query_id' => $callback_query_id,
+            'text' => '✅ تغییر با موفقیت انجام شد.',
+            'show_alert' => false,
+            'cache_time' => 5,
+        ]);
+    } else {
+        telegram('answerCallbackQuery', [
+            'callback_query_id' => $callback_query_id,
+            'text' => '❌ در ذخیره تغییرات مشکلی رخ داد.',
+            'show_alert' => true,
+            'cache_time' => 5,
+        ]);
+
+        $errorMessage = "❌ ذخیره تغییرات با مشکل مواجه شد. لطفاً دوباره تلاش کنید.";
+        sendmessage($from_id, $errorMessage, null, 'HTML');
+
+        $selectionKeyboard = getPanelSelectionKeyboard();
+        $selectionMessage = buildPanelSelectionMessage($configPath);
+        sendmessage($from_id, $selectionMessage, $selectionKeyboard, 'HTML');
+    }
 } elseif ($text == "🛠 قابلیت های پنل") {
     sendmessage($from_id, "🪚 برای استفاده از این قابلیت یکی از پنل های زیر را انتخاب نمایید", $json_list_marzban_panel, 'HTML');
     step('getlocoption', $from_id);
@@ -7582,21 +8771,22 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     $textnode = "✅ نود با موفقیت حذف گردید";
     Editmessagetext($from_id, $message_id, $textnode, $backinfoss);
 } elseif ($text == "💎 مالی" && $adminrulecheck['rule'] == "administrator") {
-    $cartotcart = select("PaySetting", "ValuePay", "NamePay", "Cartstatus", "select")['ValuePay'];
-    $plisio = select("PaySetting", "ValuePay", "NamePay", "nowpaymentstatus", "select")['ValuePay'];
-    $arzireyali1 = select("PaySetting", "ValuePay", "NamePay", "statusSwapWallet", "select")['ValuePay'];
+    $cartotcart = getPaySettingValue('Cartstatus', 'offcard');
+    $plisio = getPaySettingValue('nowpaymentstatus', 'offnowpayment');
+    $arzireyali1 = getPaySettingValue('statusSwapWallet', 'offSwapinoBot');
     if ($arzireyali1 != "onSwapinoBot" && $arzireyali1 != "offSwapinoBot") {
         update("PaySetting", "ValuePay", "onSwapinoBot", "NamePay", "statusSwapWallet");
-        $arzireyali1 = select("PaySetting", "ValuePay", "NamePay", "statusSwapWallet", "select")['ValuePay'];
+        $arzireyali1 = getPaySettingValue('statusSwapWallet', 'offSwapinoBot');
     }
-    $arzireyali2 = select("PaySetting", "ValuePay", "NamePay", "statustarnado", "select")['ValuePay'];
-    $arzireyali3 = select("PaySetting", "ValuePay", "NamePay", "statusiranpay3", "select")['ValuePay'];
-    $aqayepardakht = select("PaySetting", "ValuePay", "NamePay", "statusaqayepardakht", "select")['ValuePay'];
-    $zarinpal = select("PaySetting", "ValuePay", "NamePay", "zarinpalstatus", "select")['ValuePay'];
-    $affilnecurrency = select("PaySetting", "ValuePay", "NamePay", "digistatus", "select")['ValuePay'];
-    $paymentstatussnotverify = select("PaySetting", "ValuePay", "NamePay", "paymentstatussnotverify", "select")['ValuePay'];
-    $paymentsstartelegram = select("PaySetting", "ValuePay", "NamePay", "statusstar", "select")['ValuePay'];
-    $payment_status_nowpayment = select("PaySetting", "ValuePay", "NamePay", "statusnowpayment", "select")['ValuePay'];
+    $arzireyali2 = getPaySettingValue('statustarnado', 'offternado');
+    $arzireyali3 = getPaySettingValue('statusiranpay3', 'offiranpay3');
+    $aqayepardakht = getPaySettingValue('statusaqayepardakht', 'offaqayepardakht');
+    $zarinpal = getPaySettingValue('zarinpalstatus', 'offzarinpal');
+    $zarinpey = getPaySettingValue('zarinpeystatus', 'offzarinpey');
+    $affilnecurrency = getPaySettingValue('digistatus', 'offdigi');
+    $paymentstatussnotverify = getPaySettingValue('paymentstatussnotverify', 'offpaymentstatus');
+    $paymentsstartelegram = getPaySettingValue('statusstar', '0');
+    $payment_status_nowpayment = getPaySettingValue('statusnowpayment', '0');
     $cartotcartstatus = [
         'oncard' => $textbotlang['Admin']['Status']['statuson'],
         'offcard' => $textbotlang['Admin']['Status']['statusoff']
@@ -7621,6 +8811,10 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         'onzarinpal' => $textbotlang['Admin']['Status']['statuson'],
         'offzarinpal' => $textbotlang['Admin']['Status']['statusoff']
     ][$zarinpal];
+    $zarinpeystatus = [
+        'onzarinpey' => $textbotlang['Admin']['Status']['statuson'],
+        'offzarinpey' => $textbotlang['Admin']['Status']['statusoff']
+    ][$zarinpey];
     $affilnecurrencystatus = [
         'ondigi' => $textbotlang['Admin']['Status']['statuson'],
         'offdigi' => $textbotlang['Admin']['Status']['statusoff']
@@ -7675,6 +8869,11 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
                 ['text' => "📌ارزی ریالی سوم", 'callback_data' => "oniranpay3"],
             ],
             [
+                ['text' => "⚙️ تنظیمات", 'callback_data' => "zarinpeysetting"],
+                ['text' => $zarinpeystatus, 'callback_data' => "editpayment-zarinpey-$zarinpey"],
+                ['text' => "🟠 زرین پی", 'callback_data' => "zarinpey"],
+            ],
+            [
                 ['text' => "⚙️ تنظیمات", 'callback_data' => "aqayepardakhtsetting"],
                 ['text' => $aqayepardakhtstatus, 'callback_data' => "editpayment-aqayepardakht-$aqayepardakht"],
                 ['text' => "🔵 آقای پرداخت", 'callback_data' => "aqayepardakht"],
@@ -7699,7 +8898,7 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
                 ['text' => "⬇️ حداقل شارژ موجودی", 'callback_data' => "mainbalanceaccount"],
             ],
             [
-                ['text' => "آدرس ولت", 'callback_data' => "walletaddress"],
+                ['text' => "❌ بستن", 'callback_data' => 'close_stat']
             ],
         ]
     ]);
@@ -7774,6 +8973,13 @@ n2", $backadmin, 'HTML');
             $valuenew = "onaqayepardakht";
         }
         update("PaySetting", "ValuePay", $valuenew, "NamePay", "statusaqayepardakht");
+    } elseif ($type == "zarinpey") {
+        if ($value == "onzarinpey") {
+            $valuenew = "offzarinpey";
+        } else {
+            $valuenew = "onzarinpey";
+        }
+        update("PaySetting", "ValuePay", $valuenew, "NamePay", "zarinpeystatus");
     } elseif ($type == "zarinpal") {
         if ($value == "onzarinpal") {
             $valuenew = "offzarinpal";
@@ -7810,17 +9016,18 @@ n2", $backadmin, 'HTML');
         }
         update("PaySetting", "ValuePay", $valuenew, "NamePay", "statusnowpayment");
     }
-    $zarinpal = select("PaySetting", "ValuePay", "NamePay", "zarinpalstatus", "select")['ValuePay'];
-    $cartotcart = select("PaySetting", "ValuePay", "NamePay", "Cartstatus", "select")['ValuePay'];
-    $plisio = select("PaySetting", "ValuePay", "NamePay", "nowpaymentstatus", "select")['ValuePay'];
-    $arzireyali1 = select("PaySetting", "ValuePay", "NamePay", "statusSwapWallet", "select")['ValuePay'];
-    $arzireyali2 = select("PaySetting", "ValuePay", "NamePay", "statustarnado", "select")['ValuePay'];
-    $aqayepardakht = select("PaySetting", "ValuePay", "NamePay", "statusaqayepardakht", "select")['ValuePay'];
-    $affilnecurrency = select("PaySetting", "ValuePay", "NamePay", "digistatus", "select")['ValuePay'];
-    $arzireyali3 = select("PaySetting", "ValuePay", "NamePay", "statusiranpay3", "select")['ValuePay'];
-    $paymentstatussnotverify = select("PaySetting", "ValuePay", "NamePay", "paymentstatussnotverify", "select")['ValuePay'];
-    $paymentsstartelegram = select("PaySetting", "ValuePay", "NamePay", "statusstar", "select")['ValuePay'];
-    $payment_status_nowpayment = select("PaySetting", "ValuePay", "NamePay", "statusnowpayment", "select")['ValuePay'];
+    $zarinpal = getPaySettingValue('zarinpalstatus', 'offzarinpal');
+    $cartotcart = getPaySettingValue('Cartstatus', 'offcard');
+    $plisio = getPaySettingValue('nowpaymentstatus', 'offnowpayment');
+    $arzireyali1 = getPaySettingValue('statusSwapWallet', 'offSwapinoBot');
+    $arzireyali2 = getPaySettingValue('statustarnado', 'offternado');
+    $aqayepardakht = getPaySettingValue('statusaqayepardakht', 'offaqayepardakht');
+    $zarinpey = getPaySettingValue('zarinpeystatus', 'offzarinpey');
+    $affilnecurrency = getPaySettingValue('digistatus', 'offdigi');
+    $arzireyali3 = getPaySettingValue('statusiranpay3', 'offiranpay3');
+    $paymentstatussnotverify = getPaySettingValue('paymentstatussnotverify', 'offpaymentstatus');
+    $paymentsstartelegram = getPaySettingValue('statusstar', '0');
+    $payment_status_nowpayment = getPaySettingValue('statusnowpayment', '0');
     $cartotcartstatus = [
         'oncard' => $textbotlang['Admin']['Status']['statuson'],
         'offcard' => $textbotlang['Admin']['Status']['statusoff']
@@ -7841,6 +9048,10 @@ n2", $backadmin, 'HTML');
         'onaqayepardakht' => $textbotlang['Admin']['Status']['statuson'],
         'offaqayepardakht' => $textbotlang['Admin']['Status']['statusoff']
     ][$aqayepardakht];
+    $zarinpeystatus = [
+        'onzarinpey' => $textbotlang['Admin']['Status']['statuson'],
+        'offzarinpey' => $textbotlang['Admin']['Status']['statusoff']
+    ][$zarinpey];
     $zarinpalstatus = [
         'onzarinpal' => $textbotlang['Admin']['Status']['statuson'],
         'offzarinpal' => $textbotlang['Admin']['Status']['statusoff']
@@ -7899,6 +9110,11 @@ n2", $backadmin, 'HTML');
                 ['text' => "📌ارزی ریالی سوم", 'callback_data' => "oniranpay3"],
             ],
             [
+                ['text' => "⚙️ تنظیمات", 'callback_data' => "zarinpeysetting"],
+                ['text' => $zarinpeystatus, 'callback_data' => "editpayment-zarinpey-$zarinpey"],
+                ['text' => "🟠 زرین پی", 'callback_data' => "zarinpey"],
+            ],
+            [
                 ['text' => "⚙️ تنظیمات", 'callback_data' => "aqayepardakhtsetting"],
                 ['text' => $aqayepardakhtstatus, 'callback_data' => "editpayment-aqayepardakht-$aqayepardakht"],
                 ['text' => "🔵 آقای پرداخت", 'callback_data' => "aqayepardakht"],
@@ -7923,7 +9139,7 @@ n2", $backadmin, 'HTML');
                 ['text' => "⬇️ حداقل شارژ موجودی", 'callback_data' => "mainbalanceaccount"],
             ],
             [
-                ['text' => "آدرس ولت", 'callback_data' => "walletaddress"],
+                ['text' => "❌ بستن", 'callback_data' => 'close_stat']
             ],
         ]
     ]);
@@ -8551,17 +9767,41 @@ f,n.n2", $backadmin, 'HTML');
     sendmessage($from_id, "✅ حداکثر مبلغ واریزی تنظیم گردید.", $aqayepardakht, 'HTML');
     step("home", $from_id);
     update("PaySetting", "ValuePay", $text, "NamePay", "maxbalancezarinpal");
-} elseif ($datain == "walletaddress") {
-    $PaySetting = select("PaySetting", "ValuePay", "NamePay", "walletaddress", "select");
-    $texttronseller = "💳 آدرس ولت ترون trc20 خود را ارسال کنید
-        
-        ولت فعلی شما : {$PaySetting['ValuePay']}";
-    sendmessage($from_id, $texttronseller, $backadmin, 'HTML');
-    step('walletaddresssiranpay', $from_id);
 } elseif ($user['step'] == "walletaddresssiranpay") {
-    sendmessage($from_id, $textbotlang['Admin']['SettingnowPayment']['Savaapi'], $keyboardadmin, 'HTML');
-    update("PaySetting", "ValuePay", $text, "NamePay", "walletaddress");
+    $walletInput = trim((string) $text);
+
+    $userRecord = select("user", "*", "id", $from_id, "select");
+    $processingData = [];
+    if ($userRecord && isset($userRecord['Processing_value'])) {
+        $decodedProcessing = json_decode($userRecord['Processing_value'], true);
+        if (is_array($decodedProcessing)) {
+            $processingData = $decodedProcessing;
+        }
+    }
+
+    $walletOrigin = $processingData['walletaddress_origin'] ?? 'general';
+    $invalidKeyboard = $walletOrigin === 'trnado' ? $trnado : $backadmin;
+
+    if ($walletInput === '' || !preg_match('/^T[a-zA-Z0-9]{33}$/', $walletInput)) {
+        sendmessage($from_id, "❌ آدرس ولت وارد شده نامعتبر است. لطفاً آدرس TRC20 معتبر ارسال کنید.", $invalidKeyboard, 'HTML');
+        return;
+    }
+
+    $standardizedWallet = strtoupper($walletInput);
+
+    $successKeyboard = $walletOrigin === 'trnado' ? $trnado : $keyboardadmin;
+
+    sendmessage($from_id, $textbotlang['Admin']['SettingnowPayment']['Savaapi'], $successKeyboard, 'HTML');
+    update("PaySetting", "ValuePay", $standardizedWallet, "NamePay", "walletaddress");
+    update("user", "Processing_value", '{}', "id", $from_id);
     step('home', $from_id);
+} elseif ($text == "💼 ثبت آدرس ولت ترون (TRC20)" && $adminrulecheck['rule'] == "administrator") {
+    $PaySetting = select("PaySetting", "ValuePay", "NamePay", "walletaddress", "select");
+    $currentWallet = $PaySetting['ValuePay'] ?? '';
+    $texttronseller = "💼 لطفاً آدرس ولت ترون (TRC20) مرتبط با درگاه ترنادو را ارسال کنید.\n\nولت فعلی شما: {$currentWallet}";
+    sendmessage($from_id, $texttronseller, $trnado, 'HTML');
+    savedata('clear', 'walletaddress_origin', 'trnado');
+    step('walletaddresssiranpay', $from_id);
 } elseif ($text == "api  درگاه ارزی ریالی" && $adminrulecheck['rule'] == "administrator") {
     $PaySetting = select("PaySetting", "ValuePay", "NamePay", "apiiranpay", "select")['ValuePay'];
     $texttronseller = "📌 کد api خود را ارسال نمایید.
@@ -9351,14 +10591,19 @@ f,n.n2", $backadmin, 'HTML');
     update("user", "Balance", "0", "id", $iduser);
     sendmessage($from_id, "موجودی کاربر به مبلغ {$userdata['Balance']} صفر گردید", $keyboardadmin, 'HTML');
 } elseif (preg_match('/removeadmin_(\w+)/', $datain, $dataget) && $adminrulecheck['rule'] == "administrator") {
-    $idadmin = $dataget[1];
-    if ($idadmin == $adminnumber) {
+    $idadmin = trim($dataget[1]);
+    $mainAdminId = trim((string) $adminnumber);
+    if ($idadmin === $mainAdminId) {
         sendmessage($from_id, "❌ امکان حذف ادمین اصلی وجود ندارد", null, 'HTML');
         return;
     }
-    $stmt = $pdo->prepare("DELETE FROM admin WHERE id_admin = :id_admin");
+    $stmt = $pdo->prepare("DELETE FROM admin WHERE TRIM(id_admin) = :id_admin");
     $stmt->bindParam(':id_admin', $idadmin, PDO::PARAM_STR);
     $stmt->execute();
+    if ($stmt->rowCount() === 0) {
+        sendmessage($from_id, "⚠️ ادمینی با این شناسه یافت نشد.", null, 'HTML');
+        return;
+    }
     sendmessage($from_id, "✅ ادمین با موفقیت حذف گردید", null, 'HTML');
 }
 // elseif (preg_match('/activeconfig-(\w+)/', $datain, $dataget)) {
@@ -9494,37 +10739,41 @@ elseif ($text == "🫣 مخفی کردن پنل برای یک کاربر" && $ad
     $list_payment = $stmt->fetchAll();
     $list_payment_count = $stmt->rowCount();
     if ($list_payment_count == 0) {
-        sendmessage($from_id, "❌ هیچ پرداخت تایید نشده ای ندارید.", $list_payment, 'HTML');
+        sendmessage($from_id, "❌ هیچ پرداخت تایید نشده ای ندارید.", null, 'HTML');
         return;
     }
     $list_pay = ['inline_keyboard' => []];
     foreach ($list_payment as $payment) {
-        $list_payment['inline_keyboard'][] = [
+        $list_pay['inline_keyboard'][] = [
             ['text' => $payment['id_user'], 'callback_data' => "checkpay"]
         ];
-        $list_payment['inline_keyboard'][] = [
+        $list_pay['inline_keyboard'][] = [
             ['text' => "✅", 'callback_data' => "Confirm_pay_{$payment['id_order']}"],
             ['text' => "❌", 'callback_data' => "reject_pay_{$payment['id_order']}"],
             ['text' => "📝", 'callback_data' => "showinfopay_{$payment['id_order']}"],
             ['text' => "🗑", 'callback_data' => "removeresid_{$payment['id_order']}"],
         ];
-        $list_payment['inline_keyboard'][] = [
+        $list_pay['inline_keyboard'][] = [
             ['text' => "💸💸💸💸💸💸💸💸💸", 'callback_data' => "checkpay"]
         ];
     }
-    $list_payment['inline_keyboard'][] = [
+    $list_pay['inline_keyboard'][] = [
         ['text' => "❌ حذف همه رسید ها", 'callback_data' => "removeresid"]
     ];
-    $list_payment = json_encode($list_payment);
-    sendmessage($from_id, "📌 پرداخت های تایید نشده کارت به کارت 
+    $list_pay_json = json_encode($list_pay, JSON_UNESCAPED_UNICODE);
+    if ($list_pay_json === false) {
+        error_log('Failed to encode pending receipts keyboard: ' . json_last_error_msg());
+        $list_pay_json = json_encode(['inline_keyboard' => []], JSON_UNESCAPED_UNICODE);
+    }
+    sendmessage($from_id, "📌 پرداخت های تایید نشده کارت به کارت
 در این بخش میتوانید پرداخت های تایید نشده مشاهده و تایید یا رد نمایید.
-❌ : رد کردن پرداخت 
+❌ : رد کردن پرداخت
 ✅ : تایید پرداخت
 📝 مشخصات پرداخت
-🗑 : حذف رسید بدون اطلاع کاربر", $list_payment, 'HTML');
+🗑 : حذف رسید بدون اطلاع کاربر", $list_pay_json, 'HTML');
 } elseif ($datain == "removeresid") {
     deletemessage($from_id, $message_id);
-    sendmessage($from_id, "✅  تمامی رسید ها با موفقیت حذف شدند ", $list_payment, 'HTML');
+    sendmessage($from_id, "✅  تمامی رسید ها با موفقیت حذف شدند ", null, 'HTML');
     $sql = "UPDATE Payment_report SET payment_Status = 'reject',dec_not_confirmed = 'remove_all' WHERE Payment_Method = 'cart to cart' AND payment_Status = 'waiting'";
     $stmt = $pdo->prepare($sql);
     $stmt->execute();
@@ -10178,12 +11427,12 @@ if (isset($update["inline_query"])) {
     ));
     $destination = getcwd();
     $dirsource = "$destination/vpnbot/{$userdate['id_user']}{$userdate['username']}";
-    if (is_dir($dirsource)) {
-        shell_exec("rm -rf $dirsource");
+    if (is_dir($dirsource) && !deleteDirectory($dirsource)) {
+        error_log('Failed to remove existing bot directory: ' . $dirsource);
     }
-    mkdir($dirsource);
-    $command = "cp -r $destination/vpnbot/Default/* $dirsource 2>&1";
-    shell_exec($command);
+    if (!copyDirectoryContents($destination . '/vpnbot/Default', $dirsource)) {
+        error_log('Failed to copy default bot files into: ' . $dirsource);
+    }
     $contentconfig = file_get_contents($dirsource . "/config.php");
     $new_code = str_replace('BotTokenNew', $userdate['token'], $contentconfig);
     file_put_contents($dirsource . "/config.php", $new_code);
@@ -10219,8 +11468,12 @@ if (isset($update["inline_query"])) {
     $contentbto = select("botsaz", "*", "id_user", $id_user, "select");
     $destination = getcwd();
     $dirsource = "$destination/vpnbot/$id_user{$contentbto['username']}";
-    shell_exec("rm -rf $dirsource");
-    file_get_contents("https://api.telegram.org/bot{$contentbto['bot_toekn']}/deletewebhook");
+    if (is_dir($dirsource) && !deleteDirectory($dirsource)) {
+        error_log('Failed to remove bot directory: ' . $dirsource);
+    }
+    if (!empty($contentbto['bot_token'])) {
+        file_get_contents("https://api.telegram.org/bot{$contentbto['bot_token']}/deletewebhook");
+    }
     $stmt = $pdo->prepare("DELETE FROM botsaz WHERE id_user = :id_user");
     $stmt->bindParam(':id_user', $id_user, PDO::PARAM_STR);
     $stmt->execute();
@@ -10438,6 +11691,9 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
         unset($Bot_Status['inline_keyboard'][8]);
         unset($Bot_Status['inline_keyboard'][9]);
     }
+    $Bot_Status['inline_keyboard'][] = [
+        ['text' => "❌ بستن", 'callback_data' => 'close_stat']
+    ];
     $Bot_Status['inline_keyboard'] = array_values($Bot_Status['inline_keyboard']);
     $Bot_Status = json_encode($Bot_Status);
     sendmessage($from_id, $textbotlang['Admin']['Status']['BotTitle'], $Bot_Status, 'HTML');
@@ -10547,59 +11803,81 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
         update("marzban_panel", "on_hold_test", $valuenew, "code_panel", $code_panel);
     }
     $panel = select("marzban_panel", "*", "code_panel", $code_panel, "select");
+
     $customvlume = json_decode($panel['customvolume'], true);
+    if (!is_array($customvlume)) {
+        $customvlume = [];
+    }
+    $customvlume = array_merge([
+        'f' => '0',
+        'n' => '0',
+        'n2' => '0',
+    ], $customvlume);
+
     $statusconfig = [
         'onconfig' => $textbotlang['Admin']['Status']['statuson'],
-        'offconfig' => $textbotlang['Admin']['Status']['statusoff']
-    ][$panel['config']];
+        'offconfig' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$panel['config'] ?? 'offconfig'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $statussublink = [
         'onsublink' => $textbotlang['Admin']['Status']['statuson'],
-        'offsublink' => $textbotlang['Admin']['Status']['statusoff']
-    ][$panel['sublink']];
+        'offsublink' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$panel['sublink'] ?? 'offsublink'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $statusshowbuy = [
         'active' => $textbotlang['Admin']['Status']['statuson'],
-        'disable' => $textbotlang['Admin']['Status']['statusoff']
-    ][$panel['status']];
+        'disable' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$panel['status'] ?? 'disable'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $statusshowtest = [
         'ONTestAccount' => $textbotlang['Admin']['Status']['statuson'],
-        'OFFTestAccount' => $textbotlang['Admin']['Status']['statusoff']
-    ][$panel['TestAccount']];
+        'OFFTestAccount' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$panel['TestAccount'] ?? 'OFFTestAccount'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $statusconnecton = [
         'onconecton' => $textbotlang['Admin']['Status']['statuson'],
-        'offconecton' => $textbotlang['Admin']['Status']['statusoff']
-    ][$panel['conecton']];
+        'offconecton' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$panel['conecton'] ?? 'offconecton'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $status_extend = [
         'on_extend' => $textbotlang['Admin']['Status']['statuson'],
-        'off_extend' => $textbotlang['Admin']['Status']['statusoff']
-    ][$panel['status_extend']];
+        'off_extend' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$panel['status_extend'] ?? 'off_extend'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $changeloc = [
         'onchangeloc' => $textbotlang['Admin']['Status']['statuson'],
-        'offchangeloc' => $textbotlang['Admin']['Status']['statusoff']
-    ][$panel['changeloc']];
+        'offchangeloc' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$panel['changeloc'] ?? 'offchangeloc'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $inbocunddisable = [
         'oninbounddisable' => $textbotlang['Admin']['Status']['statuson'],
-        'offinbounddisable' => $textbotlang['Admin']['Status']['statusoff']
-    ][$panel['inboundstatus']];
+        'offinbounddisable' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$panel['inboundstatus'] ?? 'offinbounddisable'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $subvip = [
         'onsubvip' => $textbotlang['Admin']['Status']['statuson'],
-        'offsubvip' => $textbotlang['Admin']['Status']['statusoff']
-    ][$panel['subvip']];
+        'offsubvip' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$panel['subvip'] ?? 'offsubvip'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $customstatusf = [
         '1' => $textbotlang['Admin']['Status']['statuson'],
-        '0' => $textbotlang['Admin']['Status']['statusoff']
-    ][$customvlume['f']];
+        '0' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$customvlume['f'] ?? '0'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $customstatusn = [
         '1' => $textbotlang['Admin']['Status']['statuson'],
-        '0' => $textbotlang['Admin']['Status']['statusoff']
-    ][$customvlume['n']];
+        '0' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$customvlume['n'] ?? '0'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $customstatusn2 = [
         '1' => $textbotlang['Admin']['Status']['statuson'],
-        '0' => $textbotlang['Admin']['Status']['statusoff']
-    ][$customvlume['n2']];
+        '0' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$customvlume['n2'] ?? '0'] ?? $textbotlang['Admin']['Status']['statusoff'];
+
     $on_hold_test = [
         '1' => $textbotlang['Admin']['Status']['statuson'],
-        '0' => $textbotlang['Admin']['Status']['statusoff']
-    ][$panel['on_hold_test']];
+        '0' => $textbotlang['Admin']['Status']['statusoff'],
+    ][$panel['on_hold_test'] ?? '0'] ?? $textbotlang['Admin']['Status']['statusoff'];
     $Bot_Status = [
         'inline_keyboard' => [
             [
@@ -10666,6 +11944,9 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
             ['text' => "📍 اکانت غیرفعال", 'callback_data' => "none"],
         ];
     }
+    $Bot_Status['inline_keyboard'][] = [
+        ['text' => "❌ بستن", 'callback_data' => 'close_stat']
+    ];
     $Bot_Status = json_encode($Bot_Status);
     Editmessagetext($from_id, $message_id, $textbotlang['Admin']['Status']['BotTitle'], $Bot_Status);
 } elseif ($datain == "startelegram") {
@@ -10950,12 +12231,17 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     update("botsaz", "hide_panel", json_encode($list_panel), "id_user", $userdata['id_user']);
     sendmessage($from_id, "✅ پنل انتخاب شد  پس از اتمام دستور /remove را ارسال نمایید تا ذخیره نهایی شود.", null, 'HTML');
 } elseif ($datain == "voloume_or_day_all") {
+    $userslistData = '[]';
     if (is_file('cronbot/username.json')) {
-        $userslist = json_decode(file_get_contents('cronbot/users.json'), true);
-        if (is_array($userslist) and count($userslist) != 0) {
-            sendmessage($from_id, "❌ سیستم ارسال هدیه درحال انجام عملیات است پس از پایان و اطلاع رسانی  می توانید پیام جدید را ارسال نمایید.", $keyboardadmin, 'HTML');
-            return;
+        $fileContents = file_get_contents('cronbot/username.json');
+        if ($fileContents !== false && $fileContents !== '') {
+            $userslistData = $fileContents;
         }
+    }
+    $userslist = json_decode($userslistData, true);
+    if (is_array($userslist) && count($userslist) != 0) {
+        sendmessage($from_id, "❌ سیستم ارسال هدیه درحال انجام عملیات است پس از پایان و اطلاع رسانی  می توانید پیام جدید را ارسال نمایید.", $keyboardadmin, 'HTML');
+        return;
     }
     sendmessage($from_id, "📌 برای سرویس های کدام پنل میخواهید حجم یا زمان هدیه دهید؟", $json_list_marzban_panel, "html");
     step("getpanelgift", $from_id);

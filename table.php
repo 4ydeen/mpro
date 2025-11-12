@@ -7,7 +7,7 @@ global $connect;
 try {
 
     $tableName = 'user';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -39,6 +39,7 @@ try {
             cardpayment VARCHAR(100) NOT NULL,
             codeInvitation VARCHAR(100) NULL,
             pricediscount VARCHAR(100) NULL   DEFAULT '0',
+            hide_mini_app_instruction VARCHAR(20) NULL   DEFAULT '0',
             maxbuyagent VARCHAR(100) NULL   DEFAULT '0',
             joinchannel VARCHAR(100) NULL   DEFAULT '0',
             checkstatus VARCHAR(50) NULL   DEFAULT '0',
@@ -77,6 +78,7 @@ try {
         addFieldToTable($tableName, 'pagenumber', '');
         addFieldToTable($tableName, 'codeInvitation', null);
         addFieldToTable($tableName, 'pricediscount', "0");
+        addFieldToTable($tableName, 'hide_mini_app_instruction', '0', "VARCHAR(20)");
     }
 } catch (PDOException $e) {
     file_put_contents('error_log user', $e->getMessage());
@@ -86,7 +88,7 @@ try {
 try {
 
     $tableName = 'help';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -110,7 +112,7 @@ try {
 try {
 
     $tableName = 'setting';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $DATAAWARD = json_encode(array(
@@ -252,7 +254,7 @@ try {
 //-----------------------------------------------------------------
 try {
     $tableName = 'admin';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -277,7 +279,7 @@ try {
 //-----------------------------------------------------------------
 try {
     $tableName = 'channels';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -542,21 +544,23 @@ try {
     if (!$table_exists) {
         $result = $connect->query("CREATE TABLE Payment_report (
         id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        id_user varchar(200),
-        id_order varchar(2000),
-        time varchar(200)  NULL,
-        at_updated varchar(200)  NULL,
-        price varchar(200) NULL,
-        dec_not_confirmed TEXT NULL,
-        Payment_Method varchar(400) NULL,
-        payment_Status varchar(100) NULL,
-        bottype varchar(300) NULL,
+        id_user varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+        id_order varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+        time varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        at_updated varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        price varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        dec_not_confirmed TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        Payment_Method varchar(400) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        payment_Status varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        bottype varchar(300) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
         message_id INT NULL,
-        id_invoice varchar(1000) NULL)");
+        id_invoice varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL)
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         if (!$result) {
             echo "table Payment_report" . mysqli_error($connect);
         }
     } else {
+        ensureTableUtf8mb4('Payment_report');
         addFieldToTable("Payment_report", "message_id", null, "INT");
         $Check_filde = $connect->query("SHOW COLUMNS FROM Payment_report LIKE 'Payment_Method'");
         if (mysqli_num_rows($Check_filde) != 1) {
@@ -706,9 +710,7 @@ try {
 ⏳ مدت زمان: {day}  روز
 🗜 حجم سرویس:  {volume} گیگابایت
 
-لینک اتصال:
-{config}
-{links}
+{connection_links}
 🧑‍🦯 شما میتوانید شیوه اتصال را  با فشردن دکمه زیر و انتخاب سیستم عامل خود را دریافت کنید";
     $text_wgdashboard = "✅ سرویس با موفقیت ایجاد شد
 
@@ -736,7 +738,7 @@ try {
 ‏🇺🇳 لوکیشن: {location}
 
  اطلاعات سرویس :
-{config}
+{connection_links}
 🧑‍🦯 شما میتوانید شیوه اتصال را  با فشردن دکمه زیر و انتخاب سیستم عامل خود را دریافت کنید";
     $textaftertext = "✅ سرویس با موفقیت ایجاد شد
 
@@ -746,21 +748,20 @@ try {
 ⏳ مدت زمان: {day}  ساعت
 🗜 حجم سرویس:  {volume} مگابایت
 
-لینک اتصال:
-{config}
+{connection_links}
 🧑‍🦯 شما میتوانید شیوه اتصال را  با فشردن دکمه زیر و انتخاب سیستم عامل خود را دریافت کنید";
     $textconfigtest = "با سلام خدمت شما کاربر گرامی 
 سرویس تست شما با نام کاربری {username} به پایان رسیده است
 امیدواریم تجربه‌ی خوبی از آسودگی و سرعت سرویستون داشته باشین. در صورتی که از سرویس‌ تست خودتون راضی بودین، میتونید سرویس اختصاصی خودتون رو تهیه کنید و از داشتن اینترنت آزاد با نهایت کیفیت لذت ببرید😉🔥
 🛍 برای تهیه سرویس با کیفیت می توانید از دکمه زیر استفاده نمایید";
     $textcart = "برای افزایش موجودی، مبلغ <code>{price}</code>  تومان  را به شماره‌ی حساب زیر واریز کنید 👇🏻
-        
-        ==================== 
+
+        ====================
         <code>{card_number}</code>
         {name_card}
         ====================
 
-❌ این تراکنش به مدت یک ساعت اعتبار دارد پس از آن امکان پرداخت این تراکنش امکان ندارد.        
+❌ این تراکنش به مدت ۳۰ دقیقه (نیم ساعت) اعتبار دارد و پس از آن امکان پرداخت این تراکنش وجود نخواهد داشت.
 ‼مبلغ باید همان مبلغی که در بالا ذکر شده واریز نمایید.
 ‼️امکان برداشت وجه از کیف پول نیست.
 ‼️مسئولیت واریز اشتباهی با شماست.
@@ -805,6 +806,7 @@ try {
         ['iranpay2', '💸 درگاه  پرداخت ریالی دوم'],
         ['iranpay3', '💸 درگاه  پرداخت ریالی سوم'],
         ['aqayepardakht', '🔵 درگاه آقای پرداخت'],
+        ['zarinpey', '🟠 زرین پی'],
         ['mowpayment', '💸 پرداخت با ارز دیجیتال'],
         ['zarinpal', '🟡 زرین پال'],
         ['textafterpay', $textafterpay],
@@ -865,9 +867,9 @@ try {
         ['minbalance', '20000'],
         ['maxbalance', '1000000'],
         ['marchent_tronseller', '0'],
-        ['walletaddress', '0'],
+        ['walletaddress', ''],
         ['statuscardautoconfirm', 'offautoconfirm'],
-        ['urlpaymenttron', 'https://tronseller.storeddownloader.fun/api/GetOrderToken'],
+        ['urlpaymenttron', 'https://bot.tronado.cloud/api/v1/Order/GetOrderToken'],
         ['statustarnado', 'offternado'],
         ['apiternado', '0'],
         ['chashbackcart', '0'],
@@ -878,9 +880,12 @@ try {
         ['chashbackiranpay2', '0'],
         ['chashbackplisio', '0'],
         ['chashbackzarinpal', '0'],
+        ['chashbackzarinpey', '0'],
         ['checkpaycartfirst', 'offpayverify'],
         ['zarinpalstatus', 'offzarinpal'],
         ['merchant_zarinpal', '0'],
+        ['zarinpeystatus', 'offzarinpey'],
+        ['token_zarinpey', '0'],
         ['minbalancecart', $main],
         ['maxbalancecart', $max],
         ['minbalancestar', $main],
@@ -901,6 +906,8 @@ try {
         ['maxbalanceperfect', $max],
         ['minbalancezarinpal', $main],
         ['maxbalancezarinpal', $max],
+        ['minbalancezarinpey', $main],
+        ['maxbalancezarinpey', $max],
         ['minbalanceiranpay', $main],
         ['maxbalanceiranpay', $max],
         ['minbalancenowpayment', $main],
@@ -917,6 +924,7 @@ try {
         ['helpiranpay3', '2'],
         ['helpperfectmony', '2'],
         ['helpzarinpal', '2'],
+        ['helpzarinpey', '2'],
         ['helpnowpayment', '2'],
         ['helpofflinearze', '2'],
         ['autoconfirmcart', 'offauto'],
@@ -1183,10 +1191,21 @@ try {
         $result = $connect->query("CREATE TABLE card_number (
         cardnumber varchar(500) PRIMARY KEY,
         namecard  varchar(1000)  NOT NULL)
-        ");
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         if (!$result) {
             echo "table x_ui" . mysqli_error($connect);
         }
+    }
+    $columnInfo = $connect->query("SHOW FULL COLUMNS FROM card_number LIKE 'namecard'");
+    if ($columnInfo) {
+        $column = $columnInfo->fetch_assoc();
+        $currentCollation = $column['Collation'] ?? '';
+        if (empty($currentCollation) || stripos($currentCollation, 'utf8mb4') === false) {
+            $connect->query("ALTER TABLE card_number CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+            $connect->query("ALTER TABLE card_number MODIFY cardnumber varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci PRIMARY KEY");
+            $connect->query("ALTER TABLE card_number MODIFY namecard varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL");
+        }
+        $columnInfo->free();
     }
 } catch (Exception $e) {
     file_put_contents('error_log card_number', $e->getMessage());
@@ -1197,15 +1216,18 @@ try {
 
     if (!$table_exists) {
         $result = $connect->query("CREATE TABLE Requestagent (
-        id varchar(500) PRIMARY KEY,
-        username  varchar(500)  NOT NULL,
-        time  varchar(500)  NOT NULL,
-        Description  varchar(500)  NOT NULL,
-        status  varchar(500)  NOT NULL,
-        type  varchar(500)  NOT NULL)");
+        id varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci PRIMARY KEY,
+        username  varchar(500)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        time  varchar(500)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        Description  varchar(500)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        status  varchar(500)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        type  varchar(500)  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL)
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         if (!$result) {
             echo "table Requestagent" . mysqli_error($connect);
         }
+    } else {
+        ensureTableUtf8mb4('Requestagent');
     }
 } catch (Exception $e) {
     file_put_contents('error_log Requestagent', $e->getMessage());
@@ -1274,7 +1296,7 @@ try {
 try {
 
     $tableName = 'departman';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -1293,7 +1315,7 @@ try {
 try {
 
     $tableName = 'support_message';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);

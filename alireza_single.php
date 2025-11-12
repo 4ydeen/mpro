@@ -23,7 +23,8 @@ curl_setopt_array($curl, array(
   CURLOPT_HTTPHEADER => array(
     'Accept: application/json'
   ),
-  CURLOPT_COOKIEFILE => 'cookie.txt',
+  CURLOPT_COOKIEFILE => getCookieStoragePath(),
+  CURLOPT_COOKIEJAR => getCookieStoragePath(),
 ));
 $output = [];
 $response = json_decode(curl_exec($curl),true)['obj'];
@@ -46,7 +47,10 @@ foreach ($response as $client){
     
 }
 curl_close($curl);
-unlink('cookie.txt');
+$cookiePath = getCookieStoragePath();
+if (is_file($cookiePath)) {
+    unlink($cookiePath);
+}
 return $output;
 }
 function addClientalireza_singel($namepanel, $usernameac, $Expire,$Total, $Uuid,$Flow,$subid,$inboundid){
@@ -80,9 +84,12 @@ function addClientalireza_singel($namepanel, $usernameac, $Expire,$Total, $Uuid,
     );
     $req = new CurlRequest($url);
     $req->setHeaders($headers);
-    $req->setCookie('cookie.txt');
+    $req->setCookie(getCookieStoragePath());
     $response = $req->post($configpanel);
-    unlink('cookie.txt');
+    $cookiePath = getCookieStoragePath();
+    if (is_file($cookiePath)) {
+        unlink($cookiePath);
+    }
     return $response;
 }
 function updateClientalireza($namepanel, $username,array $config){
@@ -97,9 +104,12 @@ function updateClientalireza($namepanel, $username,array $config){
     );
     $req = new CurlRequest($url);
     $req->setHeaders($headers);
-    $req->setCookie('cookie.txt');
+    $req->setCookie(getCookieStoragePath());
     $response = $req->post($configpanel);
-    unlink('cookie.txt');
+    $cookiePath = getCookieStoragePath();
+    if (is_file($cookiePath)) {
+        unlink($cookiePath);
+    }
     return $response;
 }
 function ResetUserDataUsagealirezasin($usernamepanel, $namepanel){
@@ -113,9 +123,12 @@ function ResetUserDataUsagealirezasin($usernamepanel, $namepanel){
     );
     $req = new CurlRequest($url);
     $req->setHeaders($headers);
-    $req->setCookie('cookie.txt');
+    $req->setCookie(getCookieStoragePath());
     $response = $req->post($configpanel);
-    unlink('cookie.txt');
+    $cookiePath = getCookieStoragePath();
+    if (is_file($cookiePath)) {
+        unlink($cookiePath);
+    }
     return $response;
 }
 function removeClientalireza_single($location,$username){
@@ -129,11 +142,14 @@ function removeClientalireza_single($location,$username){
     );
     $req = new CurlRequest($url);
     $req->setHeaders($headers);
-    $req->setCookie('cookie.txt');
+    $req->setCookie(getCookieStoragePath());
     $response = $req->post(array());
-    unlink('cookie.txt');
+    $cookiePath = getCookieStoragePath();
+    if (is_file($cookiePath)) {
+        unlink($cookiePath);
+    }
     return $response;
-    
+
 }
 function get_onlineclialireza($name_panel,$username){
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $name_panel,"select");
@@ -153,13 +169,17 @@ curl_setopt_array($curl, array(
   CURLOPT_HTTPHEADER => array(
     'Accept: application/json'
   ),
-  CURLOPT_COOKIEFILE => 'cookie.txt',
+  CURLOPT_COOKIEFILE => getCookieStoragePath(),
+  CURLOPT_COOKIEJAR => getCookieStoragePath(),
 ));
 $response = json_decode(curl_exec($curl),true)['obj'];
 if($response == null)return "offline";
 if(in_array($username,$response))return "online";
 return "offline";
 curl_close($curl);
-unlink('cookie.txt');
+$cookiePath = getCookieStoragePath();
+if (is_file($cookiePath)) {
+    unlink($cookiePath);
+}
 
 }

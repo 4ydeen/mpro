@@ -1,6 +1,6 @@
 <?php
 session_start();
-require_once '../config.php';
+require_once __DIR__ . '/../config.php';
 $query = $pdo->prepare("SELECT * FROM admin WHERE username=:username");
     $query->bindParam("username", $_SESSION["user"], PDO::PARAM_STR);
     $query->execute();
@@ -73,34 +73,42 @@ if( !isset($_SESSION["user"]) || !$result ){
                                 <tbody> <?php
                                 foreach($listpayment as $list){
                                     $list['price'] = number_format($list['price']);
-                                    $list['Payment_Method'] = [
+
+                                    $paymentMethods = [
                                         'cart to cart' => "کارت به کارت",
                                         'low balance by admin' => "کسر موجودی توسط ادمین",
                                         "add balance by admin" => "افزایش موجودی توسط ادمین",
                                         "Currency Rial 1" => "درگاه ارزی ریالی اول",
                                         "Currency Rial tow" => "درگاه ارزی ریالی دوم",
-                                        "Currency Rial 3"	 => "درگاه ارزی ریالی سوم",
+                                        "Currency Rial 2" => "درگاه ارزی ریالی دوم",
+                                        "Currency Rial 3"        => "درگاه ارزی ریالی سوم",
                                         "aqayepardakht" => "درگاه اقای پرداخت",
+                                        "zarinpay" => "زرین پی",
                                         "zarinpal" => "زرین پال",
                                         "plisio" => "درکاه ارزی plisio",
                                         'arze digital offline' => "درگاه ارزی آفلاین",
                                         'Star Telegram' => "استار تلگرام",
                                         'nowpayment' => 'NowPayment'
-                                    ][$list['Payment_Method']];
-                                    $color = [
+                                    ];
+                                    $list['Payment_Method'] = $paymentMethods[$list['Payment_Method']] ?? $list['Payment_Method'];
+
+                                    $statusColors = [
                                         'paid' => "statuscoloregreen",
                                         'Unpaid' => "statuscolorered",
                                         'expire' => "statuscoloregry",
                                         "reject" => "statuscolorereject",
                                         "waiting" => "statuscolorewait"
-                                    ][$list['payment_Status']];
-                                    $list['payment_Status'] = [
+                                    ];
+                                    $color = $statusColors[$list['payment_Status']] ?? "";
+
+                                    $statusLabels = [
                                         'paid' => "پرداخت شده",
                                         'Unpaid' => "پرداخت نشده",
                                         'expire' => "منقضی شده",
                                         "reject" => "رد شده توسط ادمین",
                                         "waiting" => "در انتظار تایید توسط ادمین"
-                                    ][$list['payment_Status']];
+                                    ];
+                                    $list['payment_Status'] = $statusLabels[$list['payment_Status']] ?? $list['payment_Status'];
                                    echo "<tr class=\"odd gradeX\">
                                         <td>
                                         <input type=\"checkbox\" class=\"checkboxes\" value=\"1\" /></td>

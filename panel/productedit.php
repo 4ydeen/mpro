@@ -1,14 +1,16 @@
 <?php
 session_start();
-require_once '../config.php'; 
-require_once '../function.php'; 
+require_once __DIR__ . '/../config.php'; 
+require_once __DIR__ . '/../function.php'; 
 $query = $pdo->prepare("SELECT * FROM admin WHERE username=:username");
 $query->bindParam("username", $_SESSION["user"], PDO::PARAM_STR);
 $query->execute();
 $result = $query->fetch(PDO::FETCH_ASSOC);
-$query = $pdo->prepare("SELECT * FROM x_ui");
-$query->execute();
-$resultpanel = $query->fetchAll();
+// In previous versions this page attempted to load data from the deprecated
+// `x_ui` table. The table no longer exists which caused the whole page to
+// crash with a fatal PDO exception before any validation could run. The
+// product edit flow does not rely on the removed data, therefore the query is
+// skipped altogether so that the form can load normally.
 if( !isset($_SESSION["user"]) || !$result ){
     header('Location: login.php');
     return;
@@ -17,31 +19,36 @@ $statusmessage = false;
 $infomesssage = "";
 $id_product = htmlspecialchars($_GET['id'], ENT_QUOTES, 'UTF-8');
 $product = select("product","*","id",$id_product,"select");
+$action = isset($_GET['action']) ? $_GET['action'] : null;
 if($product == false){
     $statusmessage = true;
     $infomesssage ="محصول پیدا نشد";
 }else{
-if($_GET['action'] == "save"){
-    $name_product = htmlspecialchars($_POST['name_product'], ENT_QUOTES, 'UTF-8');
-    $prodcutcheck = select("product","*","name_product",$name_product,"count");
-    if($prodcutcheck != 0){
-        $statusmessage = true;
-        $infomesssage ="نام محصول وجود دارد.";
-    }else{
-        if($product['name_product'] != $name_product){
+if($action === "save" && $_SERVER['REQUEST_METHOD'] === 'POST'){
+    $name_product = htmlspecialchars($_POST['name_product'] ?? '', ENT_QUOTES, 'UTF-8');
+    if($product['name_product'] != $name_product){
+        $statement = $pdo->prepare('SELECT COUNT(*) FROM product WHERE name_product = :name_product AND id != :id');
+        $statement->execute([
+            ':name_product' => $name_product,
+            ':id' => (int) $id_product,
+        ]);
+        if($statement->fetchColumn() > 0){
+            $statusmessage = true;
+            $infomesssage ="نام محصول وجود دارد.";
+        }else{
             update("product","name_product",$name_product,"id",$id_product);
         }
     }
-    $price_product = htmlspecialchars($_POST['price_product'], ENT_QUOTES, 'UTF-8');
+    $price_product = htmlspecialchars($_POST['price_product'] ?? '', ENT_QUOTES, 'UTF-8');
     if(!is_numeric($price_product)){
         $statusmessage = true;
         $infomesssage ="مبلغ محصول باید عدد باشد";
     }else{
-        if($product['price_product'] != $name_product){
+        if($product['price_product'] != $price_product){
             update("product","price_product",$price_product,"id",$id_product);
         }
     }
-    $Volume_constraint = htmlspecialchars($_POST['Volume_constraint'], ENT_QUOTES, 'UTF-8');
+    $Volume_constraint = htmlspecialchars($_POST['Volume_constraint'] ?? '', ENT_QUOTES, 'UTF-8');
     if(!is_numeric($Volume_constraint)){
         $statusmessage = true;
         $infomesssage ="حجم محصول باید عدد باشد";
@@ -50,7 +57,7 @@ if($_GET['action'] == "save"){
             update("product","Volume_constraint",$Volume_constraint,"id",$id_product);
         }
     }
-    $Service_time = htmlspecialchars($_POST['Service_time'], ENT_QUOTES, 'UTF-8');
+    $Service_time = htmlspecialchars($_POST['Service_time'] ?? '', ENT_QUOTES, 'UTF-8');
     if(!is_numeric($Service_time)){
         $statusmessage = true;
         $infomesssage ="زمان محصول باید عدد باشد";
@@ -59,7 +66,7 @@ if($_GET['action'] == "save"){
             update("product","Service_time",$Service_time,"id",$id_product);
         }
     }
-    $agent = htmlspecialchars($_POST['agent'], ENT_QUOTES, 'UTF-8');
+    $agent = htmlspecialchars($_POST['agent'] ?? '', ENT_QUOTES, 'UTF-8');
     if(!in_array($agent,['f','n','n2'])){
         $statusmessage = true;
         $infomesssage ="گروه کاربری نامعتبر است";
@@ -68,15 +75,15 @@ if($_GET['action'] == "save"){
             update("product","agent",$agent,"id",$id_product);
         }
     }
-    $category = htmlspecialchars($_POST['category'], ENT_QUOTES, 'UTF-8');
+    $category = htmlspecialchars($_POST['category'] ?? '', ENT_QUOTES, 'UTF-8');
     if($product['category'] != $category){
             update("product","category",$category,"id",$id_product);
         }
-    $note = htmlspecialchars($_POST['note'], ENT_QUOTES, 'UTF-8');
+    $note = htmlspecialchars($_POST['note'] ?? '', ENT_QUOTES, 'UTF-8');
     if($product['note'] != $note){
             update("product","note",$note,"id",$id_product);
         }
-    
+
     if(!$statusmessage){
          header('Location: product.php');
     }

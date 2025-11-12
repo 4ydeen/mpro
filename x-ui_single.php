@@ -53,11 +53,328 @@ function login($code_panel, $verify = true)
     return json_decode($response, true);
 }
 
+function panel_get_inbounds_list($baseUrl)
+{
+    $req = new CurlRequest(rtrim($baseUrl, '/') . '/panel/api/inbounds/list');
+    $req->setHeaders(['Accept: application/json']);
+    $req->setCookie('cookie.txt');
+    return $req->get();
+}
+
+function find_uuid_by_email_in_list($jsonList, $email)
+{
+    $j = json_decode($jsonList, true);
+    if (!($j['success'] ?? false)) {
+        return null;
+    }
+    foreach ($j['obj'] ?? [] as $inb) {
+        foreach (($inb['clientStats'] ?? []) as $c) {
+            if (($c['email'] ?? '') === $email) {
+                return $c['uuid'] ?? $c['id'] ?? null;
+            }
+        }
+        $settings = $inb['settings'] ?? '{}';
+        if (is_string($settings)) {
+            $settings = json_decode($settings, true);
+        }
+        foreach (($settings['clients'] ?? []) as $c) {
+            if (($c['email'] ?? '') === $email) {
+                return $c['id'] ?? null;
+            }
+        }
+    }
+    return null;
+}
+
+function get_client_traffic_by_uuid($baseUrl, $uuid)
+{
+    $req = new CurlRequest(rtrim($baseUrl, '/') . "/panel/api/inbounds/getClientTrafficsById/{$uuid}");
+    $req->setHeaders(['Accept: application/json']);
+    $req->setCookie('cookie.txt');
+    return $req->get();
+}
+
+function extract_links_from_raw_subscription($raw)
+{
+    if (!is_string($raw)) {
+        return [];
+    }
+    $trimmed = trim($raw);
+    if ($trimmed === '') {
+        return [];
+    }
+    $decoded = base64_decode($trimmed, true);
+    if ($decoded !== false && preg_match('/(vless|vmess|trojan):\/\//i', $decoded)) {
+        $text = $decoded;
+    } else {
+        $text = $raw;
+    }
+    $links = [];
+    $lines = preg_split('/\R/', trim($text));
+    if (!is_array($lines)) {
+        return [];
+    }
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '') {
+            continue;
+        }
+        if (preg_match('/^(vless|vmess|trojan):\/\//i', $line)) {
+            $links[] = $line;
+        }
+    }
+    return $links;
+}
+
+function pick_single_link_text($raw)
+{
+    $links = extract_links_from_raw_subscription($raw);
+    return $links[0] ?? null;
+}
+
+function fetch_subscription_links_with_retry($subscriptionUrl, $attempts = 3, $delayMicroseconds = 1200000)
+{
+    $attempts = max(1, (int)$attempts);
+    $links = [];
+    $lastBody = null;
+    for ($i = 0; $i < $attempts; $i++) {
+        $req = new CurlRequest($subscriptionUrl);
+        $req->setHeaders(['User-Agent: SubFetcher/1.3']);
+        $res = $req->get();
+        if (($res['status'] ?? 0) >= 200 && ($res['status'] ?? 0) < 300 && isset($res['body'])) {
+            $lastBody = $res['body'];
+            $links = extract_links_from_raw_subscription($res['body']);
+            if (!empty($links)) {
+                return ['links' => $links, 'body' => $res['body']];
+            }
+        }
+        if ($i < $attempts - 1) {
+            usleep($delayMicroseconds);
+        }
+    }
+    return ['links' => $links, 'body' => $lastBody];
+}
+
+function fallback_single_link_from_clients_api($username, $panelName)
+{
+    if (!$username || !$panelName || !function_exists('GetClientsS_UI')) {
+        return null;
+    }
+    $clientData = GetClientsS_UI($username, $panelName);
+    if (!is_array($clientData) || empty($clientData)) {
+        return null;
+    }
+    $candidates = [];
+    if (isset($clientData['uri'])) {
+        if (is_array($clientData['uri'])) {
+            $candidates = array_merge($candidates, $clientData['uri']);
+        } else {
+            $candidates[] = $clientData['uri'];
+        }
+    }
+    if (isset($clientData['links']) && is_array($clientData['links'])) {
+        foreach ($clientData['links'] as $item) {
+            if (is_string($item)) {
+                $candidates[] = $item;
+            } elseif (is_array($item) && isset($item['uri'])) {
+                $candidates[] = $item['uri'];
+            }
+        }
+    }
+    if (isset($clientData['config']) && is_array($clientData['config'])) {
+        foreach ($clientData['config'] as $item) {
+            if (is_string($item)) {
+                $candidates[] = $item;
+            } elseif (is_array($item) && isset($item['uri'])) {
+                $candidates[] = $item['uri'];
+            }
+        }
+    }
+    foreach ($candidates as $candidate) {
+        if (!is_string($candidate)) {
+            continue;
+        }
+        $candidate = trim($candidate);
+        if ($candidate === '') {
+            continue;
+        }
+        if (preg_match('/^(vless|vmess|trojan):\/\//i', $candidate)) {
+            return $candidate;
+        }
+    }
+    return null;
+}
+
+function get_subscription_links_with_retry($subscriptionUrl, $attempts = 3, $delayMicroseconds = 1200000)
+{
+    $result = fetch_subscription_links_with_retry($subscriptionUrl, $attempts, $delayMicroseconds);
+    return $result['links'];
+}
+
+function pick_single_link_from_sub($subUrl)
+{
+    $result = fetch_subscription_links_with_retry($subUrl, 1, 0);
+    return $result['links'][0] ?? null;
+}
+
+function panel_get_inbound($baseUrl, $inboundId)
+{
+    $req = new CurlRequest(rtrim($baseUrl, '/') . '/panel/api/inbounds/get/' . $inboundId);
+    $req->setHeaders(['Accept: application/json']);
+    $req->setCookie('cookie.txt');
+    $r = $req->get();
+    if (($r['status'] ?? 0) >= 200 && ($r['status'] ?? 0) < 300) {
+        $j = json_decode($r['body'] ?? '', true);
+        if (!is_array($j)) {
+            return null;
+        }
+        $obj = $j['obj'] ?? null;
+        if (!is_array($obj)) {
+            return null;
+        }
+        if (isset($obj['settings']) && is_string($obj['settings'])) {
+            $decodedSettings = json_decode($obj['settings'], true);
+            if (is_array($decodedSettings)) {
+                $obj['settings'] = $decodedSettings;
+            }
+        }
+        if (isset($obj['streamSettings']) && is_string($obj['streamSettings'])) {
+            $decodedStream = json_decode($obj['streamSettings'], true);
+            if (is_array($decodedStream)) {
+                $obj['streamSettings'] = $decodedStream;
+            }
+        }
+        return $obj;
+    }
+    return null;
+}
+
+function find_client_by_subId($inbObj, $subId)
+{
+    $settings = $inbObj['settings'] ?? [];
+    if (is_string($settings)) {
+        $settings = json_decode($settings, true);
+    }
+    $settings = is_array($settings) ? $settings : [];
+    foreach (($settings['clients'] ?? []) as $c) {
+        if (($c['subId'] ?? '') === $subId) {
+            return $c;
+        }
+    }
+    return null;
+}
+
+function build_vless_link_from_inbound($inb, $client, $publicHost)
+{
+    $uuid = $client['id'] ?? $client['uuid'] ?? '';
+    if ($uuid === '') {
+        return null;
+    }
+    $port = $inb['port'] ?? '';
+    $remark = $inb['remark'] ?? ($client['email'] ?? '');
+    $stream = $inb['streamSettings'] ?? [];
+    if (is_string($stream)) {
+        $stream = json_decode($stream, true);
+    }
+    $stream = is_array($stream) ? $stream : [];
+    $net = $stream['network'] ?? 'tcp';
+    $sec = $stream['security'] ?? 'none';
+    $q = [
+        'type' => $net,
+        'security' => $sec,
+        'encryption' => 'none',
+    ];
+    if (!empty($client['flow'])) {
+        $q['flow'] = $client['flow'];
+    }
+    if ($net === 'tcp') {
+        $hdr = $stream['tcpSettings']['header']['type'] ?? 'none';
+        if ($hdr !== 'none') {
+            $q['headerType'] = $hdr;
+        }
+    }
+    if ($sec === 'reality') {
+        $rs = $stream['realitySettings'] ?? [];
+        $set = $rs['settings'] ?? [];
+        $pbk = $set['publicKey'] ?? null;
+        $sid = $rs['shortIds'][0] ?? null;
+        $sni = $set['serverName'] ?? ($rs['serverNames'][0] ?? null);
+        if (!$sni && !empty($rs['dest']) && strpos($rs['dest'], ':') !== false) {
+            $parts = explode(':', $rs['dest']);
+            $sni = $parts[0];
+        }
+        $fp = $set['fingerprint'] ?? null;
+        $spx = $set['spiderX'] ?? null;
+        if ($pbk) {
+            $q['pbk'] = $pbk;
+        }
+        if ($sid) {
+            $q['sid'] = $sid;
+        }
+        if ($sni) {
+            $q['sni'] = $sni;
+        }
+        if ($fp) {
+            $q['fp'] = $fp;
+        }
+        if ($spx && $spx !== '/') {
+            $q['spx'] = $spx;
+        }
+    }
+    $query = http_build_query($q, '', '&', PHP_QUERY_RFC3986);
+    $hash = rawurlencode($remark ?: ($client['email'] ?? ''));
+    return "vless://{$uuid}@{$publicHost}:{$port}?{$query}#{$hash}";
+}
+
+function get_single_link_smart($panelBase, $inboundId, $subscriptionUrl, $username = null, $panelName = null, $panelCode = null)
+{
+    $subscriptionUrl = is_string($subscriptionUrl) ? trim($subscriptionUrl) : '';
+    if ($subscriptionUrl === '') {
+        return null;
+    }
+    $result = fetch_subscription_links_with_retry($subscriptionUrl, 3, 1200000);
+    if (!empty($result['links'])) {
+        return $result['links'][0];
+    }
+    $fallback = fallback_single_link_from_clients_api($username, $panelName);
+    if ($fallback) {
+        return $fallback;
+    }
+    $panelBase = rtrim((string)$panelBase, '/');
+    if ($panelBase === '') {
+        return null;
+    }
+    if ($panelCode) {
+        login($panelCode);
+    }
+    $inb = panel_get_inbound($panelBase, $inboundId);
+    if (!$inb) {
+        return null;
+    }
+    $path = parse_url($subscriptionUrl, PHP_URL_PATH) ?: '';
+    $subId = basename($path);
+    if (!$subId) {
+        return null;
+    }
+    $client = find_client_by_subId($inb, $subId);
+    if (!$client) {
+        return null;
+    }
+    $host = parse_url($subscriptionUrl, PHP_URL_HOST) ?: 'localhost';
+    return build_vless_link_from_inbound($inb, $client, $host);
+}
+
+function get_single_link_after_create($panelBase, $inboundId, $subscriptionUrl, $username, $panelName, $panelCode = null)
+{
+    return get_single_link_smart($panelBase, $inboundId, $subscriptionUrl, $username, $panelName, $panelCode);
+}
+
 function get_clinets($username, $namepanel)
 {
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel, "select");
     login($marzban_list_get['code_panel']);
-    $url = $marzban_list_get['url_panel'] . "/panel/api/inbounds/getClientTraffics/$username";
+    $base = rtrim($marzban_list_get['url_panel'], '/');
+    $url = $base . "/panel/api/inbounds/getClientTraffics/$username";
     $headers = array(
         'Accept: application/json',
         'Content-Type: application/json',
@@ -66,8 +383,38 @@ function get_clinets($username, $namepanel)
     $req->setHeaders($headers);
     $req->setCookie('cookie.txt');
     $response = $req->get();
-    error_log(json_encode($response));
-    unlink('cookie.txt');
+
+    if (isset($response['body'])) {
+        $decodedBody = json_decode($response['body'], true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decodedBody)) {
+            if (isset($decodedBody['success']) && $decodedBody['success'] === false) {
+                $response['error'] = $decodedBody['msg'] ?? 'Unknown panel error';
+            }
+        }
+    }
+
+    if (!empty($response['error']) && stripos($response['error'], 'Inbound Not Found For Email') !== false) {
+        $list = panel_get_inbounds_list($base);
+        if (($list['status'] ?? 0) >= 200 && ($list['status'] ?? 0) < 300) {
+            $uuid = find_uuid_by_email_in_list($list['body'] ?? '', $username);
+            if ($uuid) {
+                $byId = get_client_traffic_by_uuid($base, $uuid);
+                if (($byId['status'] ?? 0) >= 200 && ($byId['status'] ?? 0) < 300) {
+                    $response = $byId;
+                    $response['error'] = null;
+                }
+            }
+        }
+    }
+
+    if (!empty($response['error'])) {
+        error_log(json_encode($response));
+    }
+
+    if (is_file('cookie.txt')) {
+        @unlink('cookie.txt');
+    }
+
     return $response;
 }
 function addClient($namepanel, $usernameac, $Expire, $Total, $Uuid, $Flow, $subid, $inboundid, $name_product, $note = "")

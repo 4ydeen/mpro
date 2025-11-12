@@ -1,11 +1,11 @@
 <?php
 ini_set('error_log', 'error_log');
 date_default_timezone_set('Asia/Tehran');
-require_once '../config.php';
-require_once '../botapi.php';
-require_once '../panels.php';
-require_once '../function.php';
-require '../vendor/autoload.php';
+require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../botapi.php';
+require_once __DIR__ . '/../panels.php';
+require_once __DIR__ . '/../function.php';
+require __DIR__ . '/../vendor/autoload.php';
 $ManagePanel = new ManagePanel();
 $setting = select("setting", "*");
 $stmt = $pdo->prepare("SHOW TABLES LIKE 'textbot'");
@@ -21,6 +21,7 @@ $datatextbot = array(
     'iranpay3' => '',
     'aqayepardakht' => '',
     'zarinpal' => '',
+    'zarinpay' => '',
     'perfectmoney' => '',
     'text_fq' => '',
     'textpaymentnotverify' =>"",
@@ -52,10 +53,11 @@ $stmt = $pdo->prepare("SELECT * FROM Payment_report WHERE time < '$month_date_ti
 $stmt->execute();
 
 while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
-    $status_var = [
+    $status_var_map = [
         'cart to cart' =>  $datatextbot['carttocart'],
         'aqayepardakht' => $datatextbot['aqayepardakht'],
         'zarinpal' => $datatextbot['zarinpal'],
+        'zarinpay' => !empty($datatextbot['zarinpay']) ? $datatextbot['zarinpay'] : $datatextbot['zarinpal'],
         'plisio' => $datatextbot['textnowpayment'],
         'arze digital offline' => $datatextbot['textnowpaymenttron'],
         'Currency Rial 1' => $datatextbot['iranpay2'],
@@ -67,8 +69,9 @@ while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
         'paymentnotverify' => $datatextbot['textpaymentnotverify'],
         'Star Telegram' => $datatextbot['text_star_telegram'],
         'nowpayment' => $datatextbot['textsnowpayment']
-        
-    ][$result['Payment_Method']];
+    ];
+
+    $status_var = $status_var_map[$result['Payment_Method']] ?? $result['Payment_Method'];
     $textexpire = "⭕️ کاربر گرامی ، فاکتور زیر به دلیل عدم پرداخت در مدت زمان مشخص شده منقضی شد .
 ❗️لطفاً به هیچ عنوان وجهی بابت این فاکتور  پرداخت نکنید و مجدداً فاکتور ایجاد نمایید ‌‌.
 

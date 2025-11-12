@@ -22,21 +22,34 @@ curl_setopt_array($curl, array(
   CURLOPT_COOKIEFILE => 'cookie.txt',
 ));
 $output = [];
-$response = curl_exec($curl);
-file_put_contents('ss',$url);
-if(!isset($response))return [];
-$response = json_decode($response,true);
-if(!$response['success'])return [];
-if(!isset($response['obj']['clients']))return array();
-foreach ($response['obj']['clients'] as $data){
-    if($data['name'] == $username)return $data;
-}
-return [];
-curl_close($curl);
+    $response = curl_exec($curl);
+    curl_close($curl);
+
+    if ($response === false) {
+        return [];
+    }
+
+    $decoded = json_decode($response, true);
+    if (!is_array($decoded) || empty($decoded['success'])) {
+        return [];
+    }
+
+    $clients = $decoded['obj']['clients'] ?? [];
+    if (!is_array($clients)) {
+        return [];
+    }
+
+    foreach ($clients as $data) {
+        if (isset($data['name']) && $data['name'] === $username) {
+            return $data;
+        }
+    }
+
+    return [];
 }
 function GetClientsS_UI($username,$namepanel){
     $userdata = get_Clients_ui($username,$namepanel);
-    if(count($userdata) == 0)return [];
+    if(!is_array($userdata) || count($userdata) == 0)return [];
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
     $curl = curl_init();curl_setopt_array($curl, array(
   CURLOPT_URL => $marzban_list_get['url_panel'].'/apiv2/clients?id='.$userdata['id'],
@@ -51,12 +64,24 @@ function GetClientsS_UI($username,$namepanel){
     'Token: '.$marzban_list_get['password_panel']
   ),
 ));
-$response = curl_exec($curl);
-if(!isset($response))return [];
-$response = json_decode(curl_exec($curl),true);
-if(!$response['success'])return [];
-return $response['obj']['clients'][0];
-curl_close($curl);
+    $response = curl_exec($curl);
+    curl_close($curl);
+
+    if ($response === false) {
+        return [];
+    }
+
+    $decoded = json_decode($response, true);
+    if (!is_array($decoded) || empty($decoded['success'])) {
+        return [];
+    }
+
+    $clients = $decoded['obj']['clients'] ?? [];
+    if (!is_array($clients) || empty($clients)) {
+        return [];
+    }
+
+    return $clients[0];
 }
 function addClientS_ui($namepanel, $usernameac, $Expire,$Total,$inboundid,$note){
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");

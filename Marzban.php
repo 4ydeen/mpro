@@ -5,6 +5,10 @@ date_default_timezone_set('Asia/Tehran');
 #-----------------------------#
 function token_panel($code_panel,$verify = true){
     $panel = select("marzban_panel","*","code_panel",$code_panel,"select");
+    if (!is_array($panel) || empty($panel)) {
+        return ["error" => "Panel configuration not found for the provided code."];
+    }
+
     $url_get_token = $panel['url_panel'].'/api/admin/token';
     $username_panel = $panel['username_panel'];
     $password_panel = $panel['password_panel'];
@@ -39,15 +43,31 @@ function token_panel($code_panel,$verify = true){
             'time' => $time,
             'access_token' => $body['access_token']
             ));
-        update("marzban_panel","datelogin",$data,'name_panel',$panel['name_panel']);
+        if (isset($panel['name_panel'])) {
+            update("marzban_panel","datelogin",$data,'name_panel',$panel['name_panel']);
+        }
     }
     return $body;
 }
 #-----------------------------#
 
+function findMarzbanPanelByName($location)
+{
+    $panel = select("marzban_panel", "*", "name_panel", $location, "select");
+    if (!is_array($panel) || empty($panel)) {
+        return null;
+    }
+
+    return $panel;
+}
+#-----------------------------#
+
 function getuser($username_account,$location)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -66,7 +86,10 @@ function getuser($username_account,$location)
 
 function Get_Nodes($location)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -83,7 +106,10 @@ function Get_Nodes($location)
 }
 function Get_usage_Nodes($location)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -100,7 +126,10 @@ function Get_usage_Nodes($location)
 }
 function Get_Node($location,$Nodeid)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -118,7 +147,10 @@ function Get_Node($location,$Nodeid)
 
 function getusers($location,$status)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -144,7 +176,10 @@ function getusers($location,$status)
 #-----------------------------#
 function getinbounds($location)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     $url =  $marzban_list_get['url_panel'].'/api/inbounds';
     $header_value = 'Bearer ';
@@ -166,7 +201,10 @@ function getinbounds($location)
 #-----------------------------#
 function ResetUserDataUsage($username_account,$location)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -184,7 +222,10 @@ function ResetUserDataUsage($username_account,$location)
 }
 function revoke_sub($username_account,$location)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -203,7 +244,10 @@ function revoke_sub($username_account,$location)
 function adduser($location,$data_limit,$username_ac,$timestamp,$note ='',$data_limit_reset = 'no_reset',$name_product = false)
 {
     global $pdo,$new_marzban;
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -323,7 +367,10 @@ function adduser($location,$data_limit,$username_ac,$timestamp,$note ='',$data_l
 }
 //----------------------------------
 function Get_System_Stats($location){
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     $url =  $marzban_list_get['url_panel'].'/api/system';
     $header_value = 'Bearer ';
@@ -345,7 +392,10 @@ function Get_System_Stats($location){
 //----------------------------------
 function removeuser($location,$username)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -361,7 +411,10 @@ function removeuser($location,$username)
     return $response;
 }
 function removenode($location,$nodeid){
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -379,7 +432,10 @@ function removenode($location,$nodeid){
 //----------------------------------
 function Modifyuser($location,$username,array $data)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -400,7 +456,10 @@ function Modifyuser($location,$username,array $data)
 
 function Modifyuser_node($location,$id_node,array $data)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     $url =  $marzban_list_get['url_panel'].'/api/node/'.$id_node;
     $payload = json_encode($data);
@@ -422,7 +481,10 @@ curl_close($ch);
 }
 function hosts($location)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     $url =  $marzban_list_get['url_panel'].'/api/hosts';
     $ch = curl_init();
@@ -443,7 +505,10 @@ curl_close($ch);
 //----------------------------------
 function reconnect_node($location,$id_node)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;
@@ -461,7 +526,10 @@ function reconnect_node($location,$id_node)
 
 function get_list_update($location,$username)
 {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
+    $marzban_list_get = findMarzbanPanelByName($location);
+    if ($marzban_list_get === null) {
+        return ["error" => "Panel configuration not found for the requested location."];
+    }
     $Check_token = token_panel($marzban_list_get['code_panel']);
     if(!empty($Check_token['error'])){
         return $Check_token;

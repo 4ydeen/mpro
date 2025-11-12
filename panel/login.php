@@ -2,14 +2,31 @@
 ini_set('session.cookie_httponly', true);
 session_start();
 session_regenerate_id(true);
-require_once '../config.php';
-require_once '../function.php';
-require_once '../botapi.php';
+require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../function.php';
+require_once __DIR__ . '/../botapi.php';
 $allowed_ips = select("setting","*",null,null,"select");
 
-$user_ip = $_SERVER['REMOTE_ADDR'];
-$admin_ids = select("admin", "id_admin",null,null,"FETCH_COLUMN");
-$check_ip = $allowed_ips['iplogin'] == $user_ip ? true:false;
+$user_ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+    $user_ip = $_SERVER['HTTP_CF_CONNECTING_IP'];
+} elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+    $forwardedIps = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+    $user_ip = trim($forwardedIps[0]);
+} elseif (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+    $user_ip = $_SERVER['HTTP_CLIENT_IP'];
+} elseif (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+    $user_ip = $_SERVER['HTTP_X_REAL_IP'];
+}
+
+$allowed_ip_value = isset($allowed_ips['iplogin']) ? trim($allowed_ips['iplogin']) : '';
+if ($allowed_ip_value === '0') {
+    $allowed_ip_value = '';
+}
+$allowed_list = array_filter(preg_split('/[\s,]+/', $allowed_ip_value), 'strlen');
+
+$check_ip = empty($allowed_list) || in_array($user_ip, $allowed_list, true);
+$admin_ids = select("admin", "id_admin", null, null, "FETCH_COLUMN");
 $texterrr = "";
 $_SESSION["user"] = null;
 if (isset($_POST['login'])) {
@@ -27,10 +44,11 @@ if (isset($_POST['login'])) {
         if ( $password == $result["password"]) {
             foreach ($admin_ids as $admin) {
                 $texts = "کاربر با نام کاربری $username وارد پنل تحت وب شد";
-        sendmessage($admin, $texts, null, 'html');
+                sendmessage($admin, $texts, null, 'html');
             }
             $_SESSION["user"] = $result["username"];
             header('Location: index.php');
+            exit;
         } else {
             $texterrr =  'رمز صحیح نمی باشد';
         }
@@ -83,13 +101,13 @@ if (isset($_POST['login'])) {
         </div>
         <?php } ?>
         <?php if($check_ip){?>
-      <form method="post" class="form-signin" action="/panel/login.php">
+      <form method="post" class="form-signin" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
         <h2 class="form-signin-heading">پنل مدیریت ربات میرزا</h2>
         <div class="login-wrap">
             <p><?php echo $texterrr; ?></p>
-            <input type="text" name ="username" class="form-control" placeholder="نام کاربری" autofocus>
-            <input type="password" name = "password" class="form-control" placeholder="کلمه عبور">
-            <button class="btn btn-lg btn-login btn-block"  name="login" type="submit">ورود</button>
+            <input type="text" name="username" class="form-control" placeholder="نام کاربری" autofocus>
+            <input type="password" name="password" class="form-control" placeholder="کلمه عبور">
+            <button class="btn btn-lg btn-login btn-block" name="login" type="submit">ورود</button>
         </div>
 
       </form>

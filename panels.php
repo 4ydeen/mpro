@@ -168,14 +168,33 @@ class ManagePanel
                     $Output['status'] = 'Unsuccessful';
                     $Output['msg'] = $data_Output['msg'];
                 } else {
-                    $links_user = outputlunk($Get_Data_Panel['linksubx'] . "/{$subId}");
-                    if (isBase64($links_user)) {
-                        $links_user = base64_decode($links_user);
+                    $subscriptionUrl = rtrim($Get_Data_Panel['linksubx'], '/') . "/{$subId}";
+                    $singleLink = get_single_link_after_create(
+                        $Get_Data_Panel['url_panel'],
+                        $inbounds,
+                        $subscriptionUrl,
+                        $usernameC,
+                        $Get_Data_Panel['name_panel'],
+                        $Get_Data_Panel['code_panel'] ?? null
+                    );
+                    $links_user = [];
+                    if ($singleLink) {
+                        $links_user[] = $singleLink;
                     }
-                    $links_user = explode("\n", trim($links_user));
+                    $subscriptionLinks = get_subscription_links_with_retry($subscriptionUrl);
+                    if (is_array($subscriptionLinks)) {
+                        foreach ($subscriptionLinks as $linkItem) {
+                            if (!in_array($linkItem, $links_user, true)) {
+                                $links_user[] = $linkItem;
+                            }
+                        }
+                    }
+                    if (empty($links_user)) {
+                        $links_user[] = 'در دسترس نیست';
+                    }
                     $Output['status'] = 'successful';
                     $Output['username'] = $usernameC;
-                    $Output['subscription_url'] = $Get_Data_Panel['linksubx'] . "/{$subId}";
+                    $Output['subscription_url'] = $subscriptionUrl;
                     $Output['configs'] = $links_user;
                     if ($inoice != false) {
                         $Output['subscription_url'] = "https://$domainhosts/sub/" . $inoice['id_invoice'];
@@ -272,6 +291,12 @@ class ManagePanel
         } elseif ($Get_Data_Panel['type'] == "WGDashboard") {
             $data_limit = round($data_limit / (1024 * 1024 * 1024), 2);
             $data_Output = addpear($Get_Data_Panel['name_panel'], $usernameC);
+            if (isset($data_Output['status']) && $data_Output['status'] === false) {
+                return array(
+                    'status' => 'Unsuccessful',
+                    'msg' => isset($data_Output['msg']) ? $data_Output['msg'] : ''
+                );
+            }
             if (!empty($data_Output['status']) && $data_Output['status'] != 200) {
                 return array(
                     'status' => 'Unsuccessful',
@@ -287,10 +312,22 @@ class ManagePanel
             $data_Output = $data_Output['body'];
             $response = json_decode($data_Output['response'], true);
             if ($data_limit != 0) {
-                setjob($Get_Data_Panel['name_panel'], "total_data", $data_limit, $data_Output['public_key']);
+                $jobResponse = setjob($Get_Data_Panel['name_panel'], "total_data", $data_limit, $data_Output['public_key']);
+                if (isset($jobResponse['status']) && $jobResponse['status'] === false) {
+                    return array(
+                        'status' => 'Unsuccessful',
+                        'msg' => isset($jobResponse['msg']) ? $jobResponse['msg'] : ''
+                    );
+                }
             }
             if ($expire != 0) {
-                setjob($Get_Data_Panel['name_panel'], "date", date('Y-m-d H:i:s', $expire), $data_Output['public_key']);
+                $jobResponse = setjob($Get_Data_Panel['name_panel'], "date", date('Y-m-d H:i:s', $expire), $data_Output['public_key']);
+                if (isset($jobResponse['status']) && $jobResponse['status'] === false) {
+                    return array(
+                        'status' => 'Unsuccessful',
+                        'msg' => isset($jobResponse['msg']) ? $jobResponse['msg'] : ''
+                    );
+                }
             }
             update("invoice", "user_info", json_encode($data_Output), "username", $usernameC);
             if (!$response['status']) {
@@ -298,6 +335,12 @@ class ManagePanel
                 $Output['msg'] = $data_Output['msg'];
             } else {
                 $download_config = downloadconfig($Get_Data_Panel['name_panel'], $data_Output['public_key']);
+                if (isset($download_config['status']) && $download_config['status'] === false) {
+                    return array(
+                        'status' => 'Unsuccessful',
+                        'msg' => isset($download_config['msg']) ? $download_config['msg'] : ''
+                    );
+                }
                 if (!empty($download_config['status']) && $download_config['status'] != 200) {
                     return array(
                         'status' => 'Unsuccessful',
@@ -373,6 +416,20 @@ class ManagePanel
             $Output['status'] = 'Unsuccessful';
             $Output['msg'] = 'Panel Not Found';
         }
+        if (function_exists('normalizeServiceConfigs')) {
+            if (isset($Output['status']) && $Output['status'] === 'successful') {
+                $Output['configs'] = normalizeServiceConfigs($Output['configs'] ?? null, $Output['subscription_url'] ?? null);
+            } else {
+                $Output['configs'] = normalizeServiceConfigs($Output['configs'] ?? null);
+            }
+        } else {
+            if (!isset($Output['configs'])) {
+                $Output['configs'] = [];
+            } elseif (!is_array($Output['configs'])) {
+                $value = trim((string) $Output['configs']);
+                $Output['configs'] = $value === '' ? [] : [$value];
+            }
+        }
         return $Output;
     }
     function DataUser($name_panel, $username)
@@ -380,7 +437,13 @@ class ManagePanel
         $Output = array();
         global $pdo, $domainhosts, $new_marzban;
         $Get_Data_Panel = select("marzban_panel", "*", "name_panel", $name_panel, "select");
-        if ($Get_Data_Panel['subvip'] == "onsubvip") {
+        if (!$Get_Data_Panel || !is_array($Get_Data_Panel)) {
+            return array(
+                'status' => 'Unsuccessful',
+                'msg' => 'Panel Not Found'
+            );
+        }
+        if (isset($Get_Data_Panel['subvip']) && $Get_Data_Panel['subvip'] == "onsubvip") {
             $inoice = select("invoice", "*", "username", $username, "select");
         } else {
             $inoice = false;
@@ -424,9 +487,15 @@ class ManagePanel
                             'msg' => $sublist_update['status']
                         );
                     }
-                    $sublist_update = json_decode($sublist_update['body'], true)['updates'][0];
-                    $UsernameData['sub_updated_at'] = $sublist_update['created_at'];
-                    $UsernameData['sub_last_user_agent'] = $sublist_update['user_agent'];
+                    $sublist_update_body = json_decode($sublist_update['body'], true);
+                    if (!empty($sublist_update_body['updates']) && is_array($sublist_update_body['updates'])) {
+                        $first_update = $sublist_update_body['updates'][0];
+                        $UsernameData['sub_updated_at'] = isset($first_update['created_at']) ? $first_update['created_at'] : null;
+                        $UsernameData['sub_last_user_agent'] = isset($first_update['user_agent']) ? $first_update['user_agent'] : null;
+                    } else {
+                        $UsernameData['sub_updated_at'] = isset($UsernameData['sub_updated_at']) ? $UsernameData['sub_updated_at'] : null;
+                        $UsernameData['sub_last_user_agent'] = isset($UsernameData['sub_last_user_agent']) ? $UsernameData['sub_last_user_agent'] : null;
+                    }
                 } else {
                     $UsernameData['expire'] = $UsernameData['expire'];
                 }
@@ -434,7 +503,7 @@ class ManagePanel
                     $UsernameData['subscription_url'] = "https://$domainhosts/sub/" . $inoice['id_invoice'];
                 }
                 if ($new_marzban) {
-                    $UsernameData['proxies'] = $UsernameData['proxy_settings'];
+                    $UsernameData['proxies'] = isset($UsernameData['proxy_settings']) ? $UsernameData['proxy_settings'] : null;
                 }
                 $Output = array(
                     'status' => $UsernameData['status'],
@@ -569,11 +638,47 @@ class ManagePanel
                 $user_data['enable'] = "on_hold";
                 $expire = 0;
             }
-            $linksub = $Get_Data_Panel['linksubx'] . "/{$user_data['subId']}";
-            $links_user = outputlunk($Get_Data_Panel['linksubx'] . "/{$user_data['subId']}");
-            if (isBase64($links_user))
-                $links_user = base64_decode($links_user);
-            $links_user = explode("\n", trim($links_user));
+            $subscriptionUrl = rtrim($Get_Data_Panel['linksubx'], '/') . "/{$user_data['subId']}";
+            $linksub = $subscriptionUrl;
+            $links_user_raw = outputlunk($subscriptionUrl);
+            if (!is_string($links_user_raw)) {
+                $links_user_raw = '';
+            }
+            if (isBase64($links_user_raw)) {
+                $links_user_raw = base64_decode($links_user_raw);
+            }
+            $links_user = preg_split('/\R/', trim($links_user_raw));
+            if (!is_array($links_user)) {
+                $links_user = [];
+            }
+            $links_user = array_values(array_filter(array_map('trim', $links_user), function ($ln) {
+                return $ln !== '';
+            }));
+            $singleLink = $links_user[0] ?? null;
+            if (!$singleLink || !preg_match('/^(vless|vmess|trojan):\/\//i', $singleLink)) {
+                if (is_file('cookie.txt')) {
+                    @unlink('cookie.txt');
+                }
+                login($Get_Data_Panel['code_panel']);
+                $singleLink = get_single_link_smart(
+                    $Get_Data_Panel['url_panel'],
+                    $Get_Data_Panel['inboundid'],
+                    $subscriptionUrl,
+                    $username,
+                    $Get_Data_Panel['name_panel'],
+                    $Get_Data_Panel['code_panel'] ?? null
+                );
+                if (is_file('cookie.txt')) {
+                    @unlink('cookie.txt');
+                }
+                if (!$singleLink) {
+                    return array(
+                        'status' => 'Unsuccessful',
+                        'msg' => 'Unable to build single link'
+                    );
+                }
+                array_unshift($links_user, $singleLink);
+            }
             if ($inoice != false)
                 $linksub = "https://$domainhosts/sub/" . $inoice['id_invoice'];
             $user_data['lastOnline'] = $user_data['lastOnline'] == 0 ? "offline" : date('Y-m-d H:i:s', $user_data['lastOnline'] / 1000);
@@ -603,26 +708,29 @@ class ManagePanel
                     'msg' => $UsernameData['message']
                 );
             } else {
-                if ($UsernameData['start_date'] == null) {
+                $startDate = $UsernameData['start_date'] ?? null;
+                if ($startDate === null) {
                     $date = 0;
                 } else {
-                    $current_date = time();
-                    $start_date = strtotime($UsernameData['start_date']);
-                    $end_date = $start_date + ($UsernameData['package_days'] * 86400);
+                    $start_date = strtotime($startDate);
+                    $package_days = isset($UsernameData['package_days']) ? intval($UsernameData['package_days']) : 0;
+                    $end_date = $start_date + ($package_days * 86400);
                     $date = strtotime(date("Y-m-d H:i:s", $end_date));
                 }
-                $UsernameData['usage_limit_GB'] = $UsernameData['usage_limit_GB'] * pow(1024, 3);
-                $UsernameData['current_usage_GB'] = $UsernameData['current_usage_GB'] * pow(1024, 3);
-                $linksuburl = "{$Get_Data_Panel['linksubx']}/{$UsernameData['uuid']}/";
-                $linksubconfig = $linksuburl . "sub";
-                if ($UsernameData['last_online'] == "1-01-01 00:00:00") {
-                    $UsernameData['last_online'] = null;
+                $usageLimit = isset($UsernameData['usage_limit_GB']) ? $UsernameData['usage_limit_GB'] * pow(1024, 3) : 0;
+                $currentUsage = isset($UsernameData['current_usage_GB']) ? $UsernameData['current_usage_GB'] * pow(1024, 3) : 0;
+                $uuid = $UsernameData['uuid'] ?? null;
+                $linksuburl = $uuid ? "{$Get_Data_Panel['linksubx']}/{$uuid}/" : $Get_Data_Panel['linksubx'];
+                $lastOnline = $UsernameData['last_online'] ?? null;
+                if ($lastOnline == "1-01-01 00:00:00") {
+                    $lastOnline = null;
                 }
-                if ($UsernameData['usage_limit_GB'] - $UsernameData['current_usage_GB'] <= 0) {
+                $remainingTraffic = $usageLimit - $currentUsage;
+                if ($usageLimit > 0 && $remainingTraffic <= 0) {
                     $status = "limited";
-                } elseif ($date - time() <= 0 and $date != 0) {
+                } elseif ($date != 0 && ($date - time()) <= 0) {
                     $status = "expired";
-                } elseif ($UsernameData['start_date'] == null) {
+                } elseif ($startDate === null) {
                     $status = "on_hold";
                 } else {
                     $status = "active";
@@ -632,11 +740,11 @@ class ManagePanel
                 }
                 $Output = array(
                     'status' => $status,
-                    'username' => $UsernameData['name'],
-                    'data_limit' => $UsernameData['usage_limit_GB'],
+                    'username' => $UsernameData['name'] ?? ($UsernameData['email'] ?? $username),
+                    'data_limit' => $usageLimit,
                     'expire' => $date,
-                    'online_at' => $UsernameData['last_online'],
-                    'used_traffic' => $UsernameData['current_usage_GB'],
+                    'online_at' => $lastOnline,
+                    'used_traffic' => $currentUsage,
                     'links' => [],
                     'subscription_url' => $linksuburl,
                     'sub_updated_at' => null,
@@ -711,6 +819,12 @@ class ManagePanel
             }
         } elseif ($Get_Data_Panel['type'] == "WGDashboard") {
             $UsernameData = get_userwg($username, $Get_Data_Panel['name_panel']);
+            if (isset($UsernameData['status']) && $UsernameData['status'] === false && !isset($UsernameData['id'])) {
+                return array(
+                    'status' => 'Unsuccessful',
+                    'msg' => isset($UsernameData['msg']) ? $UsernameData['msg'] : ''
+                );
+            }
             $invoiceinfo = select("invoice", "*", "username", $username, "select");
             $infoconfig = isset($invoiceinfo['user_info']) ? json_decode($invoiceinfo['user_info'], true) : json_encode(array());
             if (!isset($UsernameData['id'])) {
@@ -748,6 +862,12 @@ class ManagePanel
                     $status = "limited";
                 }
                 $download_config = downloadconfig($Get_Data_Panel['name_panel'], $UsernameData['id']);
+                if (isset($download_config['status']) && $download_config['status'] === false) {
+                    return array(
+                        'status' => 'Unsuccessful',
+                        'msg' => isset($download_config['msg']) ? $download_config['msg'] : ''
+                    );
+                }
                 if (!empty($download_config['status']) && $download_config['status'] != 200) {
                     return array(
                         'status' => 'Unsuccessful',
@@ -1429,6 +1549,12 @@ class ManagePanel
             );
         } elseif ($Get_Data_Panel['type'] == "WGDashboard") {
             $data_user = get_userwg($username, $name_panel);
+            if (isset($data_user['status']) && $data_user['status'] === false && !isset($data_user['id'])) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($data_user['msg']) ? $data_user['msg'] : ''
+                );
+            }
             $configs = array(
                 "DNS" => $data_user['DNS'],
                 "allowed_ip" => $data_user['allowed_ip'],
@@ -1443,6 +1569,12 @@ class ManagePanel
             );
             $configs = array_merge($configs, $config);
             $modify = updatepear($Get_Data_Panel['name_panel'], $configs);
+            if (isset($modify['status']) && $modify['status'] === false) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($modify['msg']) ? $modify['msg'] : ''
+                );
+            }
             if (!empty($modify['error'])) {
                 return array(
                     'status' => false,
@@ -1696,9 +1828,27 @@ class ManagePanel
                 'data' => $reset
             );
         } elseif ($panel['type'] == "WGDashboard") {
-            allowAccessPeers($panel['name_panel'], $username);
+            $allowResponse = allowAccessPeers($panel['name_panel'], $username);
+            if (isset($allowResponse['status']) && $allowResponse['status'] === false) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($allowResponse['msg']) ? $allowResponse['msg'] : ''
+                );
+            }
             $datauser = get_userwg($username, $panel['name_panel']);
+            if (isset($datauser['status']) && $datauser['status'] === false && !isset($datauser['id'])) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($datauser['msg']) ? $datauser['msg'] : ''
+                );
+            }
             $reset = ResetUserDataUsagewg($datauser['id'], $panel['name_panel']);
+            if (isset($reset['status']) && $reset['status'] === false) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($reset['msg']) ? $reset['msg'] : ''
+                );
+            }
             if (!empty($reset['status']) && $reset['status'] != 200) {
                 return array(
                     'status' => false,
@@ -1864,8 +2014,20 @@ class ManagePanel
                     );
                 }
             }
-            allowAccessPeers($panel['name_panel'], $username);
+            $allowResponse = allowAccessPeers($panel['name_panel'], $username);
+            if (isset($allowResponse['status']) && $allowResponse['status'] === false) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($allowResponse['msg']) ? $allowResponse['msg'] : ''
+                );
+            }
             $datauser = get_userwg($username, $panel['name_panel']);
+            if (isset($datauser['status']) && $datauser['status'] === false && !isset($datauser['id'])) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($datauser['msg']) ? $datauser['msg'] : ''
+                );
+            }
             $count = 0;
             foreach ($datauser['jobs'] as $jobsvolume) {
                 if ($jobsvolume['Field'] == "date") {
@@ -1876,7 +2038,13 @@ class ManagePanel
             $datam = array(
                 "Job" => $datauser['jobs'][$count],
             );
-            deletejob($panel['name_panel'], $datam);
+            $deleteJob = deletejob($panel['name_panel'], $datam);
+            if (isset($deleteJob['status']) && $deleteJob['status'] === false) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($deleteJob['msg']) ? $deleteJob['msg'] : ''
+                );
+            }
             $count = 0;
             foreach ($datauser['jobs'] as $jobsvolume) {
                 if ($jobsvolume['Field'] == "total_data") {
@@ -1887,13 +2055,31 @@ class ManagePanel
             $datam = array(
                 "Job" => $datauser['jobs'][$count],
             );
-            deletejob($panel['name_panel'], $datam);
+            $deleteJob = deletejob($panel['name_panel'], $datam);
+            if (isset($deleteJob['status']) && $deleteJob['status'] === false) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($deleteJob['msg']) ? $deleteJob['msg'] : ''
+                );
+            }
             $time_new = date("Y-m-d H:i:s", $time_new);
             if ($time_day != 0) {
-                setjob($panel['name_panel'], "date", $time_new, $datauser['id']);
+                $setJob = setjob($panel['name_panel'], "date", $time_new, $datauser['id']);
+                if (isset($setJob['status']) && $setJob['status'] === false) {
+                    return array(
+                        'status' => false,
+                        'msg' => isset($setJob['msg']) ? $setJob['msg'] : ''
+                    );
+                }
             }
             if ($new_limit != 0) {
-                setjob($panel['name_panel'], "total_data", $data_limit_new / pow(1024, 3), $datauser['id']);
+                $setJob = setjob($panel['name_panel'], "total_data", $data_limit_new / pow(1024, 3), $datauser['id']);
+                if (isset($setJob['status']) && $setJob['status'] === false) {
+                    return array(
+                        'status' => false,
+                        'msg' => isset($setJob['msg']) ? $setJob['msg'] : ''
+                    );
+                }
             }
             return array(
                 'status' => true
@@ -2000,8 +2186,20 @@ class ManagePanel
                 "usage_limit_GB" => $new_limit / pow(1024, 3),
             );
         } elseif ($panel['type'] == "WGDashboard") {
-            allowAccessPeers($panel['name_panel'], $username_account);
+            $allowResponse = allowAccessPeers($panel['name_panel'], $username_account);
+            if (isset($allowResponse['status']) && $allowResponse['status'] === false) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($allowResponse['msg']) ? $allowResponse['msg'] : ''
+                );
+            }
             $datauser = get_userwg($username_account, $panel['name_panel']);
+            if (isset($datauser['status']) && $datauser['status'] === false && !isset($datauser['id'])) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($datauser['msg']) ? $datauser['msg'] : ''
+                );
+            }
             $count = 0;
             foreach ($datauser['jobs'] as $jobsvolume) {
                 if ($jobsvolume['Field'] == "total_data") {
@@ -2013,11 +2211,29 @@ class ManagePanel
                 $datam = array(
                     "Job" => $datauser['jobs'][$count],
                 );
-                deletejob($panel['name_panel'], $datam);
+                $deleteJob = deletejob($panel['name_panel'], $datam);
+                if (isset($deleteJob['status']) && $deleteJob['status'] === false) {
+                    return array(
+                        'status' => false,
+                        'msg' => isset($deleteJob['msg']) ? $deleteJob['msg'] : ''
+                    );
+                }
             } else {
-                $this->ResetUserDataUsage($username_account, $panel['name_panel']);
+                $resetResult = $this->ResetUserDataUsage($username_account, $panel['name_panel']);
+                if (isset($resetResult['status']) && $resetResult['status'] === false) {
+                    return array(
+                        'status' => false,
+                        'msg' => isset($resetResult['msg']) ? $resetResult['msg'] : ''
+                    );
+                }
             }
             $log = setjob($panel['name_panel'], "total_data", $new_limit / pow(1024, 3), $datauser['id']);
+            if (isset($log['status']) && $log['status'] === false) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($log['msg']) ? $log['msg'] : ''
+                );
+            }
             return array(
                 'status' => true,
                 'data' => $log
@@ -2120,8 +2336,20 @@ class ManagePanel
                 "start_date" => null
             );
         } elseif ($panel['type'] == "WGDashboard") {
-            allowAccessPeers($panel['name_panel'], $username_account);
+            $allowResponse = allowAccessPeers($panel['name_panel'], $username_account);
+            if (isset($allowResponse['status']) && $allowResponse['status'] === false) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($allowResponse['msg']) ? $allowResponse['msg'] : ''
+                );
+            }
             $datauser = get_userwg($username_account, $panel['name_panel']);
+            if (isset($datauser['status']) && $datauser['status'] === false && !isset($datauser['id'])) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($datauser['msg']) ? $datauser['msg'] : ''
+                );
+            }
             $count = 0;
             foreach ($datauser['jobs'] as $jobsvolume) {
                 if ($jobsvolume['Field'] == "date") {
@@ -2133,9 +2361,21 @@ class ManagePanel
                 $datam = array(
                     "Job" => $datauser['jobs'][$count],
                 );
-                deletejob($panel['name_panel'], $datam);
+                $deleteJob = deletejob($panel['name_panel'], $datam);
+                if (isset($deleteJob['status']) && $deleteJob['status'] === false) {
+                    return array(
+                        'status' => false,
+                        'msg' => isset($deleteJob['msg']) ? $deleteJob['msg'] : ''
+                    );
+                }
             }
             $log = setjob($panel['name_panel'], "date", date('Y-m-d H:i:s', $new_limit), $datauser['id']);
+            if (isset($log['status']) && $log['status'] === false) {
+                return array(
+                    'status' => false,
+                    'msg' => isset($log['msg']) ? $log['msg'] : ''
+                );
+            }
             return array(
                 'status' => true,
                 'data' => $log
