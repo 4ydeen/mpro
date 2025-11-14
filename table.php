@@ -7,7 +7,7 @@ global $connect;
 try {
 
     $tableName = 'user';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -88,7 +88,7 @@ try {
 try {
 
     $tableName = 'help';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -112,7 +112,7 @@ try {
 try {
 
     $tableName = 'setting';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $DATAAWARD = json_encode(array(
@@ -254,7 +254,7 @@ try {
 //-----------------------------------------------------------------
 try {
     $tableName = 'admin';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -279,7 +279,7 @@ try {
 //-----------------------------------------------------------------
 try {
     $tableName = 'channels';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -414,20 +414,10 @@ try {
         addFieldToTable("marzban_panel", "status", "active", "VARCHAR(50)");
         addFieldToTable("marzban_panel", "sublink", "onsublink", "VARCHAR(50)");
         addFieldToTable("marzban_panel", "config", "offconfig", "VARCHAR(50)");
-        $max_stmt = $connect->query("SELECT MAX(CAST(SUBSTRING(code_panel, 3) AS UNSIGNED)) as max_num FROM marzban_panel WHERE code_panel LIKE '7e%'");
-        $max_row = $max_stmt->fetch_assoc();
-        $next_num = $max_row['max_num'] ? (int)$max_row['max_num'] + 1 : 15;
-        $stmt = $connect->query("SELECT id FROM marzban_panel WHERE code_panel IS NULL OR code_panel = ''");
-        while ($row = $stmt->fetch_assoc()) {
-            $code = '7e' . $next_num;
-            $connect->query("UPDATE marzban_panel SET code_panel = '$code' WHERE id = " . $row['id']);
-            $next_num++;
-        }
     }
 } catch (Exception $e) {
     file_put_contents('error_log', $e->getMessage());
 }
-
 //-----------------------------------------------------------------
 try {
 
@@ -720,9 +710,7 @@ try {
 ⏳ مدت زمان: {day}  روز
 🗜 حجم سرویس:  {volume} گیگابایت
 
-لینک اتصال:
-{config}
-{links}
+{connection_links}
 🧑‍🦯 شما میتوانید شیوه اتصال را  با فشردن دکمه زیر و انتخاب سیستم عامل خود را دریافت کنید";
     $text_wgdashboard = "✅ سرویس با موفقیت ایجاد شد
 
@@ -750,7 +738,7 @@ try {
 ‏🇺🇳 لوکیشن: {location}
 
  اطلاعات سرویس :
-{config}
+{connection_links}
 🧑‍🦯 شما میتوانید شیوه اتصال را  با فشردن دکمه زیر و انتخاب سیستم عامل خود را دریافت کنید";
     $textaftertext = "✅ سرویس با موفقیت ایجاد شد
 
@@ -760,21 +748,20 @@ try {
 ⏳ مدت زمان: {day}  ساعت
 🗜 حجم سرویس:  {volume} مگابایت
 
-لینک اتصال:
-{config}
+{connection_links}
 🧑‍🦯 شما میتوانید شیوه اتصال را  با فشردن دکمه زیر و انتخاب سیستم عامل خود را دریافت کنید";
     $textconfigtest = "با سلام خدمت شما کاربر گرامی 
 سرویس تست شما با نام کاربری {username} به پایان رسیده است
 امیدواریم تجربه‌ی خوبی از آسودگی و سرعت سرویستون داشته باشین. در صورتی که از سرویس‌ تست خودتون راضی بودین، میتونید سرویس اختصاصی خودتون رو تهیه کنید و از داشتن اینترنت آزاد با نهایت کیفیت لذت ببرید😉🔥
 🛍 برای تهیه سرویس با کیفیت می توانید از دکمه زیر استفاده نمایید";
     $textcart = "برای افزایش موجودی، مبلغ <code>{price}</code>  تومان  را به شماره‌ی حساب زیر واریز کنید 👇🏻
-        
-        ==================== 
+
+        ====================
         <code>{card_number}</code>
         {name_card}
         ====================
 
-❌ این تراکنش به مدت یک ساعت اعتبار دارد پس از آن امکان پرداخت این تراکنش امکان ندارد.        
+❌ این تراکنش به مدت ۳۰ دقیقه (نیم ساعت) اعتبار دارد و پس از آن امکان پرداخت این تراکنش وجود نخواهد داشت.
 ‼مبلغ باید همان مبلغی که در بالا ذکر شده واریز نمایید.
 ‼️امکان برداشت وجه از کیف پول نیست.
 ‼️مسئولیت واریز اشتباهی با شماست.
@@ -819,6 +806,7 @@ try {
         ['iranpay2', '💸 درگاه  پرداخت ریالی دوم'],
         ['iranpay3', '💸 درگاه  پرداخت ریالی سوم'],
         ['aqayepardakht', '🔵 درگاه آقای پرداخت'],
+        ['zarinpey', '🟠 زرین پی'],
         ['mowpayment', '💸 پرداخت با ارز دیجیتال'],
         ['zarinpal', '🟡 زرین پال'],
         ['textafterpay', $textafterpay],
@@ -879,9 +867,9 @@ try {
         ['minbalance', '20000'],
         ['maxbalance', '1000000'],
         ['marchent_tronseller', '0'],
-        ['walletaddress', '0'],
+        ['walletaddress', ''],
         ['statuscardautoconfirm', 'offautoconfirm'],
-        ['urlpaymenttron', 'https://tronseller.storeddownloader.fun/api/GetOrderToken'],
+        ['urlpaymenttron', 'https://bot.tronado.cloud/api/v1/Order/GetOrderToken'],
         ['statustarnado', 'offternado'],
         ['apiternado', '0'],
         ['chashbackcart', '0'],
@@ -892,9 +880,12 @@ try {
         ['chashbackiranpay2', '0'],
         ['chashbackplisio', '0'],
         ['chashbackzarinpal', '0'],
+        ['chashbackzarinpey', '0'],
         ['checkpaycartfirst', 'offpayverify'],
         ['zarinpalstatus', 'offzarinpal'],
         ['merchant_zarinpal', '0'],
+        ['zarinpeystatus', 'offzarinpey'],
+        ['token_zarinpey', '0'],
         ['minbalancecart', $main],
         ['maxbalancecart', $max],
         ['minbalancestar', $main],
@@ -915,6 +906,8 @@ try {
         ['maxbalanceperfect', $max],
         ['minbalancezarinpal', $main],
         ['maxbalancezarinpal', $max],
+        ['minbalancezarinpey', $main],
+        ['maxbalancezarinpey', $max],
         ['minbalanceiranpay', $main],
         ['maxbalanceiranpay', $max],
         ['minbalancenowpayment', $main],
@@ -931,6 +924,7 @@ try {
         ['helpiranpay3', '2'],
         ['helpperfectmony', '2'],
         ['helpzarinpal', '2'],
+        ['helpzarinpey', '2'],
         ['helpnowpayment', '2'],
         ['helpofflinearze', '2'],
         ['autoconfirmcart', 'offauto'],
@@ -1302,7 +1296,7 @@ try {
 try {
 
     $tableName = 'departman';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -1321,7 +1315,7 @@ try {
 try {
 
     $tableName = 'support_message';
-    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName");
     $stmt->bindParam(':tableName', $tableName);
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -1486,7 +1480,7 @@ $connect->query("ALTER TABLE `invoice` CHANGE `username` `username` VARCHAR(200)
 $connect->query("ALTER TABLE `invoice` CHANGE `Service_location` `Service_location` VARCHAR(200)");
 $connect->query("ALTER TABLE `invoice` CHANGE `time_sell` `time_sell` VARCHAR(200)");
 $connect->query("ALTER TABLE marzban_panel MODIFY name_panel VARCHAR(255) COLLATE utf8mb4_bin");
-$connect->query("ALTER TABLE product MODIFY name_product VARCHAR(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin");
+$connect->query("ALTER TABLE product MODIFY name_product VARCHAR(255) COLLATE utf8mb4_bin");
 $connect->query("ALTER TABLE help MODIFY name_os VARCHAR(500) COLLATE utf8mb4_bin");
 telegram('setwebhook', [
     'url' => "https://$domainhosts/index.php"
