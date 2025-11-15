@@ -16,3 +16,8 @@
 ⭐ لطفاً پروژه را **Star** کنید تا دیگران هم آن را پیدا کنند!
 
 
+---
+
+```
+bash -c "$(curl -L https://raw.githubusercontent.com/Mmd-Amir/mirza_pro/main/install.sh)"
+```
