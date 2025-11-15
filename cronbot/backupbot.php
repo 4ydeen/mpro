@@ -389,13 +389,14 @@ try {
             throw new RuntimeException('Zip file creation failed');
         }
 
-        telegram('sendDocument', [
-            'chat_id' => $setting['Channel_Report'],
-            'message_thread_id' => $reportbackup,
-            'document' => new CURLFile($zip_file_name),
-            'caption' => "<b>📦 خروجی دیتابیس ربات اصلی\n\n\nاین پروژه حاصل کلی وقت، تست و دیباگ‌ های زیاد بوده تا همه‌ چیز دقیق و بدون خطا کار کنه 💪\n\n💫 حمایتت با دنبال‌کردن ما توی <a href=\"https://t.me/LumeTeam\">@LumeTeam</a> باعث میشه با انرژی بیشتری روی بهبود و آپدیت‌های بعدی کار کنیم 😁</b>",
-            'parse_mode' => 'HTML',
-        ]);
+telegram('sendDocument', [
+    'chat_id' => $setting['Channel_Report'],
+    'message_thread_id' => $reportbackup,
+    'document' => new CURLFile($zip_file_name),
+    'caption' => "<b>برای حمایت از این پروژه، لطفاً در گیت‌هاب به آن ستاره (Star) دهید.<br>
+    ⭐ <a href=\"https://github.com/Mmd-Amir/mirza_pro\">مشاهده پروژه در GitHub</a></b>",
+    'parse_mode' => 'HTML',
+]);
 
         if (file_exists($zip_file_name)) {
             unlink($zip_file_name);

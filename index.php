@@ -1609,10 +1609,12 @@ $textconnect
     $mainvolume = $mainvolume[$user['agent']];
     $maxvolume = json_decode($marzban_list_get['maxvolume'], true);
     $maxvolume = $maxvolume[$user['agent']];
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :service_location OR Location = '/all')");
-    $stmt->execute([
-        ':service_location' => $marzban_list_get['name_panel'],
-    ]);
+$stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :service_location OR Location = '/all') AND agent = :agent AND one_buy_status = '0'");
+$stmt->execute([
+    ':service_location' => $marzban_list_get['name_panel'],
+    ':agent' => $user['agent'],
+]);
+
     $product = $stmt->rowCount();
     savedata("clear", "id_invoice", $nameloc['id_invoice']);
     if ($product == 0) {
@@ -1705,11 +1707,13 @@ $textconnect
     $monthenumber = $dataget[1];
     $userdate = json_decode($user['Processing_value'], true);
     $nameloc = select("invoice", "*", "id_invoice", $userdate['id_invoice'], "select");
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :service_location OR Location = '/all') AND Service_time = :monthe");
-    $stmt->execute([
-        ':service_location' => $nameloc['Service_location'],
-        'monthe' => $monthenumber
-    ]);
+$stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :service_location OR Location = '/all') AND agent = :agent AND Service_time = :monthe AND one_buy_status = '0'");
+$stmt->execute([
+    ':service_location' => $nameloc['Service_location'],
+    ':agent' => $user['agent'],
+    'monthe' => $monthenumber
+]);
+
     $productextend = ['inline_keyboard' => []];
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select");
     $statusshowprice = select("shopSetting", "*", "Namevalue", "statusshowprice", "select")['value'];
@@ -1795,11 +1799,13 @@ $textconnect
         $product['Volume_constraint'] = $userdate['volume'];
         step("home", $from_id);
     } else {
-        $stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :service_location OR Location = '/all') AND code_product = :code_product");
-        $stmt->execute([
-            ':service_location' => $nameloc['Service_location'],
-            ':code_product' => $codeproduct,
-        ]);
+$stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :service_location OR Location = '/all') AND agent = :agent AND code_product = :code_product");
+$stmt->execute([
+    ':service_location' => $nameloc['Service_location'],
+    ':agent' => $user['agent'],
+    ':code_product' => $codeproduct,
+]);
+
         $product = $stmt->fetch(PDO::FETCH_ASSOC);
     }
     if ($product == false) {
@@ -2496,11 +2502,13 @@ $textconnect
         $prodcut['code_product'] = "🛍 حجم دلخواه";
         $product['inbounds'] = null;
     } else {
-        $stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :service_location OR Location = '/all') AND name_product = :name_product");
-        $stmt->execute([
-            ':service_location' => $nameloc['Service_location'],
-            'name_product' => $nameloc['name_product']
-        ]);
+    $stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :service_location OR Location = '/all') AND agent = :agent AND name_product = :name_product");
+    $stmt->execute([
+        ':service_location' => $nameloc['Service_location'],
+        ':agent' => $user['agent'],
+        'name_product' => $nameloc['name_product']
+    ]);
+
         $prodcut = $stmt->fetch(PDO::FETCH_ASSOC);
     }
     if ($product['inbounds'] != null) {
@@ -3884,7 +3892,7 @@ $textinvite
                     sendmessage($from_id, "📌 دسته بندی خود را انتخاب نمایید!", KeyboardCategory($location, $user['agent'], $backuser), 'HTML');
                 }
             } else {
-                $query = "SELECT * FROM product WHERE (Location = '$location' OR Location = '/all')";
+                $query = "SELECT * FROM product WHERE (Location = '$location' OR Location = '/all') AND agent= '{$user['agent']}'";
                 $marzban_list_get = select("marzban_panel", "*", "name_panel", $location, "select");
                 $statuscustomvolume = json_decode($marzban_list_get['customvolume'], true)[$user['agent']];
                 if ($marzban_list_get['MethodUsername'] == $textbotlang['users']['customusername'] || $marzban_list_get['MethodUsername'] == "نام کاربری دلخواه + عدد رندوم") {
@@ -3982,7 +3990,7 @@ $textinvite
             $marzban_list_get = select("marzban_panel", "*", "name_panel", $location, "select");
             Editmessagetext($from_id, $message_id, "📌 دسته بندی خود را انتخاب نمایید!", KeyboardCategory($location, $user['agent'], "buybacktow"));
         } else {
-            $query = "SELECT * FROM product WHERE (Location = '$location' OR Location = '/all')";
+            $query = "SELECT * FROM product WHERE (Location = '$location' OR Location = '/all') AND agent= '{$user['agent']}'";
             $statuscustomvolume = json_decode($marzban_list_get['customvolume'], true)[$user['agent']];
             if ($marzban_list_get['MethodUsername'] == $textbotlang['users']['customusername'] || $marzban_list_get['MethodUsername'] == "نام کاربری دلخواه + عدد رندوم") {
                 $datakeyboard = "prodcutservices_";
@@ -4017,12 +4025,13 @@ $textinvite
 } elseif (preg_match('/^categorynames_(.*)/', $datain, $dataget)) {
     $categorynames = $dataget[1];
     $categorynames = select("category", "remark", "id", $categorynames, "select")['remark'];
-    $userdate = json_decode($user['Processing_value'], true);
-    if (isset($userdate['monthproduct'])) {
-        $query = "SELECT * FROM product WHERE (Location = '{$userdate['name_panel']}' OR Location = '/all') AND category = '$categorynames' AND Service_time = '{$userdate['monthproduct']}'";
-    } else {
-        $query = "SELECT * FROM product WHERE (Location = '{$userdate['name_panel']}' OR Location = '/all') AND category = '$categorynames'";
-    }
+  $userdate = json_decode($user['Processing_value'], true);
+if (isset($userdate['monthproduct'])) {
+    $query = "SELECT * FROM product WHERE (Location = '{$userdate['name_panel']}' OR Location = '/all') AND agent= '{$user['agent']}' AND category = '$categorynames' AND Service_time = '{$userdate['monthproduct']}'";
+} else {
+    $query = "SELECT * FROM product WHERE (Location = '{$userdate['name_panel']}' OR Location = '/all') AND agent= '{$user['agent']}' AND category = '$categorynames'";
+}
+
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $userdate['name_panel'], "select");
     $statuscustomvolume = json_decode($marzban_list_get['customvolume'], true)[$user['agent']];
     if ($marzban_list_get['MethodUsername'] == $textbotlang['users']['customusername'] || $marzban_list_get['MethodUsername'] == "نام کاربری دلخواه + عدد رندوم") {
@@ -4743,7 +4752,7 @@ $textonebuy
     } else {
         $statuscustom = false;
     }
-    $query = "SELECT * FROM product WHERE (Location = '$location' OR Location = '/all')";
+    $query = "SELECT * FROM product WHERE (Location = '$location' OR Location = '/all') AND agent= '{$user['agent']}'";
     Editmessagetext($from_id, $message_id, $textbotlang['users']['sell']['Service-select'], KeyboardProduct($marzban_list_get['name_panel'], $query, $user['pricediscount'], $datakeyboard, $statuscustom, "backuser", null, "customsellvolumeom"));
 } elseif ($datain == "customsellvolumeom") {
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
@@ -7550,7 +7559,7 @@ if (isset($update['pre_checkout_query'])) {
     }
     $location = $location['name_panel'];
     update("user", "Processing_value", $location, "id", $from_id);
-    $query = "SELECT * FROM product WHERE (Location = '$location' OR Location = '/all')";
+    $query = "SELECT * FROM product WHERE (Location = '$location' OR Location = '/all') AND agent= '{$user['agent']}'";
     $marzban_list_get = select("marzban_panel", "*", "code_panel", $location, "select");
     $statuscustomvolume = json_decode($marzban_list_get['customvolume'], true)[$user['agent']];
     if ($marzban_list_get['MethodUsername'] == $textbotlang['users']['customusername'] || $marzban_list_get['MethodUsername'] == "نام کاربری دلخواه + عدد رندوم") {
@@ -7568,11 +7577,13 @@ if (isset($update['pre_checkout_query'])) {
     deletemessage($from_id, $message_id);
     $codeproduct = $dataget[1];
     $username = $dataget[2];
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :processing_value OR Location = '/all') AND code_product = :code_product");
-    $stmt->execute([
-        ':processing_value' => $user['Processing_value'],
-        ':code_product' => $codeproduct,
-    ]);
+$stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :processing_value OR Location = '/all') AND agent = :agent AND code_product = :code_product");
+$stmt->execute([
+    ':processing_value' => $user['Processing_value'],
+    ':agent' => $user['agent'],
+    ':code_product' => $codeproduct,
+]);
+
     $prodcut = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($prodcut == false) {
         sendmessage($from_id, $textbotlang['users']['erroroccurred'], $keyboard, 'html');
@@ -7590,11 +7601,13 @@ if (isset($update['pre_checkout_query'])) {
     $codeproduct = $dataget[1];
     $usernamePanelExtends = $dataget[2];
     deletemessage($from_id, $message_id);
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :processing_value OR Location = '/all') AND code_product = :code_product");
-    $stmt->execute([
-        ':processing_value' => $user['Processing_value'],
-        ':code_product' => $codeproduct,
-    ]);
+$stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :processing_value OR Location = '/all') AND agent = :agent AND code_product = :code_product");
+$stmt->execute([
+    ':processing_value' => $user['Processing_value'],
+    ':agent' => $user['agent'],
+    ':code_product' => $codeproduct,
+]);
+
     $prodcut = $stmt->fetch(PDO::FETCH_ASSOC);
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
     $DataUserOut = $ManagePanel->DataUser($marzban_list_get['name_panel'], $usernamePanelExtends);

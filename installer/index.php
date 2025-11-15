@@ -5,36 +5,29 @@ $configDirectory = $rootDirectory.'config.php';
 $tablesDirectory = $rootDirectory.'table.php';
 if(!file_exists($configDirectory) || !file_exists($tablesDirectory)) {
     $ERROR[] = "فایل های پروژه ناقص هستند.";
-    $ERROR[] = "فایل های پروژه را مجددا دانلود و بارگذاری کنید (<a href='https://github.com/Mmd-Amir/MirzaPro_stable_v2'>‎🌐 Github</a>)";
+    $ERROR[] = "فایل های پروژه را مجددا دانلود و بارگذاری کنید (<a href='https://github.com/Mmd-Amir/mirza_pro2'>‎🌐 Github</a>)";
 }
 if(phpversion() < 8.2){
     $ERROR[] = "نسخه PHP شما باید حداقل 8.2 باشد.";
     $ERROR[] = "نسخه فعلی: ".phpversion();
     $ERROR[] = "لطفا نسخه PHP خود را به 8.2 یا بالاتر ارتقا دهید.";
 }
-if(!empty($_SERVER['SCRIPT_URI'])) {
-    $URI = str_replace($_SERVER['REQUEST_SCHEME'].'://','',$_SERVER['SCRIPT_URI']);
-    if(basename($URI) == 'index.php') {
-        $URI = (dirname($URI));
-    }
-    $webAddress = rtrim(dirname($URI), '/') . '/';
-}
-else {
-    $tempPath = dirname(dirname($_SERVER['SCRIPT_NAME']));
-    $webAddress = rtrim($_SERVER['HTTP_HOST'] . $tempPath, '/') . '/';
-}
+$tempPath = dirname(dirname($_SERVER['SCRIPT_NAME']));
+$tempPath = str_replace('//', '/', '/' . trim($tempPath, '/'));
+$webAddress = rtrim($_SERVER['HTTP_HOST'] . $tempPath, '/') . '/';
 $success = false;
 $tgBot = [];
 $botFirstMessage = '';
 $installType = $uPOST['install_type'] ?? 'simple';
+$serverType = $uPOST['server_type'] ?? 'cpanel';
 $hasDbBackup = $uPOST['has_db_backup'] ?? 'no';
 function needsBackupUpload($installType, $hasDbBackup) {
     if ($installType == 'simple') return false;
-    if (($installType == 'migrate_free_to_pro' || $installType == 'migrate_pro_to_pro') && $hasDbBackup == 'yes') return false;
-    return (($installType == 'migrate_free_to_pro' || $installType == 'migrate_pro_to_pro') && $hasDbBackup == 'no');
+    if (($installType == 'migrate_free_to_pro') && $hasDbBackup == 'yes') return false;
+    return (($installType == 'migrate_free_to_pro') && $hasDbBackup == 'no');
 }
 function needsMigration($installType) {
-    return ($installType == 'migrate_free_to_pro' || $installType == 'migrate_pro_to_pro');
+    return ($installType == 'migrate_free_to_pro');
 }
 function isHttps() {
     return (
@@ -250,6 +243,33 @@ function handleDatabaseImport($dbInfo, &$ERROR) {
         writeLog($logHandle, "✅ AUTOCOMMIT = 0");
         $mysqli->query("START TRANSACTION");
         writeLog($logHandle, "✅ Transaction شروع شد");
+
+        // Drop tables with content before import
+        writeLog($logHandle, "\n🗑️ بررسی و حذف جداول دارای محتوا...");
+        $tablesResult = $mysqli->query("SHOW TABLES");
+        $droppedTables = 0;
+        if ($tablesResult) {
+            while ($row = $tablesResult->fetch_array(MYSQLI_NUM)) {
+                $tableName = $row[0];
+                $countResult = $mysqli->query("SELECT COUNT(*) FROM `$tableName`");
+                if ($countResult) {
+                    $rowCount = $countResult->fetch_row()[0];
+                    if ($rowCount > 0) {
+                        if ($mysqli->query("DROP TABLE `$tableName`")) {
+                            writeLog($logHandle, "✅ جدول '$tableName' حذف شد (تعداد رکوردها: $rowCount)");
+                            $droppedTables++;
+                        } else {
+                            writeLog($logHandle, "❌ خطا در حذف جدول '$tableName': " . $mysqli->error);
+                            $ERROR[] = "خطا در حذف جدول '$tableName' قبل از ایمپورت.";
+                        }
+                    } else {
+                        writeLog($logHandle, "ℹ️ جدول '$tableName' خالی است (رکورد: $rowCount) - بدون تغییر");
+                    }
+                }
+            }
+        }
+        writeLog($logHandle, "📊 جداول حذف شده: $droppedTables");
+
         $successCount = 0;
         $failCount = 0;
         $errorMessages = [];
@@ -714,7 +734,7 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
         $ERROR[] = "اطلاعات ورودی را بررسی کنید.";
         $ERROR[] = "<code>".$e->getMessage()."</code>";
     }
-    if(in_array($installType, ['migration', 'migrate_free_to_pro', 'migrate_pro_to_pro']) && $hasDbBackup == 'no' && empty($ERROR)) {
+    if(in_array($installType, ['migrate_free_to_pro']) && $hasDbBackup == 'no' && empty($ERROR)) {
         $importSuccess = handleDatabaseImport($dbInfo, $ERROR);
         if($importSuccess) {
             $SUCCESS[] = "✅ بکاپ دیتابیس با موفقیت ایمپورت شد!";
@@ -731,15 +751,46 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
             '{username_bot}' => $tgBot['details']['result']['username']
         ];
         $replacementCount = 0;
-        $newConfigData = updateConfigValues($rawConfigData, $replacements, $replacementCount);
+        if ($serverType == 'server') {
+            $serverConfigTemplate = '<?php
+$APIKEY = \'{API_KEY}\';
+$usernamedb = \'{username_db}\';
+$passworddb = \'{password_db}\';
+$dbname = \'{database_name}\';
+$domainhosts = \'{domain_name}\';
+$adminnumber = \'{admin_number}\';
+$usernamebot = \'{username_bot}\';
+$secrettoken = \'A6M3yCSN\';
+$connect = mysqli_connect(\'localhost\', $usernamedb, $passworddb, $dbname);
+if ($connect->connect_error) {
+die(\' The connection to the database failed:\' . $connect->connect_error);
+}
+mysqli_set_charset($connect, \'utf8mb4\');
+$options = [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    PDO::ATTR_EMULATE_PREPARES => false,
+];
+$dsn = "mysql:host=localhost;dbname=$dbname;charset=utf8mb4";
+try {
+     $pdo = new PDO($dsn, $usernamedb, $passworddb, $options);
+} catch (\\PDOException $e) {
+     throw new \\PDOException($e->getMessage(), (int)$e->getCode());
+}
+?>';
+            $newConfigData = str_replace(array_keys($replacements), array_values($replacements), $serverConfigTemplate);
+            $replacementCount = count($replacements);
+        } else {
+            $newConfigData = updateConfigValues($rawConfigData, $replacements, $replacementCount);
+        }
         if($replacementCount === 0 || file_put_contents($configDirectory,$newConfigData) === false) {
             $ERROR[] = '✏️❌ خطا در زمان بازنویسی اطلاعات فایل اصلی ربات';
-            $ERROR[] = "فایل های پروژه را مجددا دانلود و بارگذاری کنید (<a href='https://github.com/Mmd-Amir/MirzaPro_stable_v2'>‎🌐 Github</a>)";
+            $ERROR[] = "فایل های پروژه را مجددا دانلود و بارگذاری کنید (<a href='hhttps://github.com/Mmd-Amir/mirza_pro2'>‎🌐 Github</a>)";
     }
         else {
             $tableResult = getContents("https://".$document['address']."/table.php");
             $SUCCESS[] = "✅ جداول دیتابیس ایجاد/بروزرسانی شد";
-            if(needsMigration($installType) || $installType == 'migration') {
+            if(needsMigration($installType)) {
                 $migrationLog = [];
                 $migrationResult = runCompleteMigration($dbInfo, $tgAdminId, $migrationLog);
                 if($migrationResult) {
@@ -772,9 +823,59 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
         * {
             font-family: Vazir, sans-serif;
         }
+        .server-type-selector {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin: 24px 0;
+        }
+        @media (max-width: 768px) {
+            .server-type-selector {
+                grid-template-columns: 1fr;
+            }
+        }
+        .server-type-card {
+            border: 2px solid rgba(50, 184, 198, 0.4);
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: rgba(0, 0, 0, 0.2);
+        }
+        .server-type-card:hover {
+            border-color: #32b8c6;
+            background: rgba(50, 184, 198, 0.1);
+        }
+        .server-type-card.active {
+            border-color: #32b8c6;
+            background: rgba(50, 184, 198, 0.2);
+            box-shadow: 0 0 20px rgba(50, 184, 198, 0.3);
+        }
+        .server-type-card h3 {
+            margin-bottom: 12px;
+            color: #32b8c6;
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .server-type-card i {
+            font-size: 20px;
+        }
+        .server-type-card p {
+            color: #aaa;
+            font-size: 13px;
+            margin: 0;
+        }
+        .server-type-card input {
+            display: none;
+        }
         .install-type-selector {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(2, 1fr);
             gap: 16px;
             margin: 24px 0;
         }
@@ -875,6 +976,12 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
             background: rgba(50, 184, 198, 0.25);
             box-shadow: 0 0 20px rgba(50, 184, 198, 0.4);
         }
+        .migration-section {
+            display: none;
+        }
+        .migration-section.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -908,9 +1015,21 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
             </script>
         <?php endif; ?>
         <form id="installer-form" <?php if($success) { echo 'style="display:none;"'; } ?> method="post" enctype="multipart/form-data">
-                        <div class="install-type-selector">
-                <div class="install-type-card" onclick="selectInstallType('simple')">
-                    <input type="radio" name="install_type" value="simple" id="simple">
+            <div class="server-type-selector">
+                <div class="server-type-card active" onclick="selectServerType('cpanel')">
+                    <input type="radio" name="server_type" value="cpanel" id="cpanel" checked>
+                    <h3><i class="fas fa-server"></i> هاست cPanel</h3>
+                    <p>نصب روی هاست cPanel</p>
+                </div>
+                <div class="server-type-card" onclick="selectServerType('server')">
+                    <input type="radio" name="server_type" value="server" id="server">
+                    <h3><i class="fas fa-cloud"></i> سرور</h3>
+                    <p>نصب روی سرور (مسیر: /var/www/html/mirzabotconfig)</p>
+                </div>
+            </div>
+            <div class="install-type-selector" id="install-type-selector">
+                <div class="install-type-card active" onclick="selectInstallType('simple')">
+                    <input type="radio" name="install_type" value="simple" id="simple" checked>
                     <h3><i class="fas fa-download"></i> نصب ساده</h3>
                     <p>نصب جدید بدون داده قبلی</p>
                 </div>
@@ -918,11 +1037,6 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
                     <input type="radio" name="install_type" value="migrate_free_to_pro" id="migrate_free_to_pro">
                     <h3><i class="fas fa-arrow-up"></i> مهاجرت رایگان به پرو</h3>
                     <p>انتقال از نسخه رایگان به پرو</p>
-                </div>
-                <div class="install-type-card" onclick="selectInstallType('migrate_pro_to_pro')">
-                    <input type="radio" name="install_type" value="migrate_pro_to_pro" id="migrate_pro_to_pro">
-                    <h3><i class="fas fa-sync-alt"></i> مهاجرت پرو به پرو</h3>
-                    <p>انتقال از پرو قدیم به پرو جدید</p>
                 </div>
             </div>
             <div id="db-backup-question" style="display: none;">
@@ -940,7 +1054,7 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
                 </div>
                 <input type="hidden" name="has_db_backup" id="has_db_backup" value="no">
             </div>
-<div class="migration-section <?php echo ($installType == 'migration') ? 'active' : ''; ?>" id="migration-section" style="display: none;">
+            <div class="migration-section" id="migration-section">
                 <h3><i class="fas fa-file-archive"></i> آپلود فایل بکاپ</h3>
                 <div class="file-upload">
                     <label for="backup_file"><i class="fas fa-folder-open"></i> فایل بکاپ دیتابیس (SQL یا ZIP):</label>
@@ -979,7 +1093,7 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
                 <details>
                     <summary for="secret_key"><i class="fas fa-globe"></i> آدرس سورس ربات</summary>
                     <label for="bot_address_webhook">آدرس صفحه سورس ربات (نه installer! مثال: https:
-                    <input type="text" id="bot_address_webhook" name="bot_address_webhook" placeholder="https://yourdomain.com/index.php" value="<?php echo escapeHtml($uPOST['bot_address_webhook'] ?? ($webAddress.'/index.php')); ?>" required>
+                    <input type="text" id="bot_address_webhook" name="bot_address_webhook" placeholder="https://yourdomain.com/mirzabotconfig/index.php" value="<?php echo escapeHtml($uPOST['bot_address_webhook'] ?? ($webAddress.'/index.php')); ?>" required>
                 </details>
             </div>
             <div class="form-group">
@@ -989,17 +1103,26 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
             <button type="submit" name="submit" value="submit"><i class="fas fa-rocket"></i> نصب ربات</button>
         </form>
         <footer>
-            <p>MirzabotPro Installer , Made by ♥️ | <a href="https://github.com/Mmd-Amir/MirzaPro_stable_v2">Github</a> | <a href="https://t.me/+TDJJIwuYUsozMzI0">Telegram</a> | &copy; <?php echo date('Y'); ?></p>
+            <p>MirzabotPro Installer , Made by ♥️ | <a href="https://github.com/Mmd-Amir/mirza_pro2">Github</a> | <a href="https://t.me/+TDJJIwuYUsozMzI0">Telegram</a> | &copy; <?php echo date('Y'); ?></p>
         </footer>
     </div>
     <script>
+        function selectServerType(type) {
+            var cpanelEl = document.getElementById('cpanel');
+            var serverEl = document.getElementById('server');
+            if (cpanelEl) cpanelEl.checked = (type === 'cpanel');
+            if (serverEl) serverEl.checked = (type === 'server');
+            document.querySelectorAll('.server-type-card').forEach(function(card) {
+                card.classList.remove('active');
+            });
+            event.currentTarget.classList.add('active');
+            updateInstallTypes();
+        }
         function selectInstallType(type) {
             var simpleEl = document.getElementById('simple');
             var freeEl = document.getElementById('migrate_free_to_pro');
-            var proEl = document.getElementById('migrate_pro_to_pro');
             if (simpleEl) simpleEl.checked = (type === 'simple');
             if (freeEl) freeEl.checked = (type === 'migrate_free_to_pro');
-            if (proEl) proEl.checked = (type === 'migrate_pro_to_pro');
             document.querySelectorAll('.install-type-card').forEach(function(card) {
                 card.classList.remove('active');
             });
@@ -1008,12 +1131,36 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
             }
             var dbQuestion = document.getElementById('db-backup-question');
             var migrationSection = document.getElementById('migration-section');
-            if (type === 'migrate_free_to_pro' || type === 'migrate_pro_to_pro') {
+            if (type === 'migrate_free_to_pro') {
                 if (dbQuestion) dbQuestion.style.display = 'block';
                 toggleBackupUpload();
             } else {
                 if (dbQuestion) dbQuestion.style.display = 'none';
                 if (migrationSection) migrationSection.style.display = 'none';
+            }
+        }
+        function updateInstallTypes() {
+            var serverType = document.querySelector('input[name="server_type"]:checked').value;
+            var simpleCard = document.querySelector('input[value="simple"]').parentElement;
+            var freeCard = document.querySelector('input[value="migrate_free_to_pro"]').parentElement;
+            var installSelector = document.getElementById('install-type-selector');
+            if (serverType === 'server') {
+                simpleCard.style.display = 'none';
+                freeCard.style.display = 'block';
+                freeCard.classList.add('active');
+                document.getElementById('migrate_free_to_pro').checked = true;
+                document.getElementById('db-backup-question').style.display = 'block';
+                document.getElementById('migration-section').classList.add('active');
+                document.getElementById('has_db_backup').value = 'no';
+                document.querySelector('.backup-btn[data-value="no"]').classList.add('active');
+                document.querySelector('.backup-btn[data-value="yes"]').classList.remove('active');
+            } else {
+                simpleCard.style.display = 'block';
+                freeCard.style.display = 'block';
+                simpleCard.classList.add('active');
+                document.getElementById('simple').checked = true;
+                document.getElementById('db-backup-question').style.display = 'none';
+                document.getElementById('migration-section').classList.remove('active');
             }
         }
         function handleBackupChoice(value) {
@@ -1029,14 +1176,17 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
             var hasBackup = document.getElementById('has_db_backup').value;
             var migrationSection = document.getElementById('migration-section');
             if (!installType) return;
-            var isMigration = (installType.value === 'migrate_free_to_pro' || installType.value === 'migrate_pro_to_pro');
+            var isMigration = (installType.value === 'migrate_free_to_pro');
             var needsUpload = (hasBackup === 'no');
-            if (isMigration && needsUpload && migrationSection) {
-                migrationSection.style.display = 'block';
+            if (isMigration && needsUpload) {
+                if (migrationSection) migrationSection.classList.add('active');
             } else if (migrationSection) {
-                migrationSection.style.display = 'none';
+                migrationSection.classList.remove('active');
             }
         }
+        document.addEventListener('DOMContentLoaded', function() {
+            updateInstallTypes();
+        });
     </script>
 </body>
 </html>
