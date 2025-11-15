@@ -2,38 +2,28 @@
 ini_set('display_errors', 0);
 ini_set('display_startup_errors', 0);
 error_reporting(E_ALL);
-
 $logFilePath = __DIR__ . '/../logs/backup_' . date('Y-m-d') . '.log';
 $logDirectory = dirname($logFilePath);
-
 if (!is_dir($logDirectory)) {
     @mkdir($logDirectory, 0755, true);
 }
-
 ini_set('log_errors', 1);
 ini_set('error_log', $logFilePath);
-
 define('LOG_LEVEL', 'ERROR');
-
 function logMessage($level, $message, $context = [])
 {
     global $logFilePath;
-
     $levels = ['DEBUG' => 0, 'INFO' => 1, 'WARNING' => 2, 'ERROR' => 3, 'CRITICAL' => 4];
     $currentLevel = defined('LOG_LEVEL') ? LOG_LEVEL : 'INFO';
-
     if ($levels[$level] < $levels[$currentLevel]) {
         return;
     }
-
     $timestamp = date('Y-m-d H:i:s');
     $contextString = !empty($context) ? ' | Context: ' . json_encode($context, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) : '';
-
     $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3);
     $caller = isset($backtrace[1]) ? $backtrace[1] : $backtrace[0];
     $file = isset($caller['file']) ? basename($caller['file']) : 'unknown';
     $line = isset($caller['line']) ? $caller['line'] : 0;
-
     $logEntry = sprintf(
         "[%s] [%s] [%s:%d] %s%s\n",
         $timestamp,
@@ -43,11 +33,9 @@ function logMessage($level, $message, $context = [])
         $message,
         $contextString
     );
-
     @file_put_contents($logFilePath, $logEntry, FILE_APPEND | LOCK_EX);
     error_log(strip_tags($logEntry));
 }
-
 function logException(Throwable $e, $additionalContext = [])
 {
     $context = array_merge([
@@ -58,10 +46,8 @@ function logException(Throwable $e, $additionalContext = [])
         'line' => $e->getLine(),
         'trace' => $e->getTraceAsString(),
     ], $additionalContext);
-
     logMessage('ERROR', 'Exception occurred: ' . $e->getMessage(), $context);
 }
-
 function shutdownHandler()
 {
     $error = error_get_last();
@@ -73,7 +59,6 @@ function shutdownHandler()
         ]);
     }
 }
-
 function errorHandler($errno, $errstr, $errfile, $errline)
 {
     $errorTypes = [
@@ -93,49 +78,38 @@ function errorHandler($errno, $errstr, $errfile, $errline)
         E_DEPRECATED => 'DEPRECATED',
         E_USER_DEPRECATED => 'USER_DEPRECATED',
     ];
-
     $errorType = isset($errorTypes[$errno]) ? $errorTypes[$errno] : 'UNKNOWN';
-
     logMessage('ERROR', sprintf('[%s] %s', $errorType, $errstr), [
         'file' => $errfile,
         'line' => $errline,
         'error_code' => $errno,
     ]);
-
     return false;
 }
-
 set_error_handler('errorHandler');
 set_exception_handler('logException');
 register_shutdown_function('shutdownHandler');
-
 try {
     require_once __DIR__ . '/../config.php';
     require_once __DIR__ . '/../function.php';
     require_once __DIR__ . '/../botapi.php';
-
     $pdoInstance = getDatabaseConnection();
     if (!($pdoInstance instanceof PDO) && function_exists('get_pdo_connection')) {
         $pdoInstance = get_pdo_connection();
     }
-
     if (!($pdoInstance instanceof PDO)) {
         throw new RuntimeException('Failed to establish PDO connection');
     }
-
     function isExecAvailable()
     {
         static $canExec;
-
         if ($canExec !== null) {
             return $canExec;
         }
-
         if (!function_exists('exec')) {
             $canExec = false;
             return $canExec;
         }
-
         $disabledFunctions = ini_get('disable_functions');
         if (!empty($disabledFunctions)) {
             $disabledList = array_map('trim', explode(',', $disabledFunctions));
@@ -144,47 +118,37 @@ try {
                 return $canExec;
             }
         }
-
         $canExec = true;
         return $canExec;
     }
-
     function createSqlDump(?PDO $pdo, $databaseName, $filePath)
     {
         if (!($pdo instanceof PDO)) {
             logMessage('ERROR', 'createSqlDump: PDO connection is not available');
             return false;
         }
-
         try {
             $handle = @fopen($filePath, 'w');
             if ($handle === false) {
                 logMessage('ERROR', 'Unable to open dump file for writing', ['file' => $filePath]);
                 return false;
             }
-
             $header = sprintf("-- Database: `%s`\n-- Generated at: %s\n\nSET FOREIGN_KEY_CHECKS=0;\n\n", $databaseName, date('c'));
             fwrite($handle, $header);
-
             $tablesStmt = $pdo->query('SHOW TABLES');
             $tableCount = 0;
-
             while ($tableRow = $tablesStmt->fetch(PDO::FETCH_NUM)) {
                 $tableName = $tableRow[0];
                 $tableCount++;
-
                 $createStmt = $pdo->query("SHOW CREATE TABLE `{$tableName}`");
                 $createData = $createStmt->fetch(PDO::FETCH_ASSOC);
                 if (!isset($createData['Create Table'])) {
                     continue;
                 }
-
                 fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n");
                 fwrite($handle, $createData['Create Table'] . ";\n\n");
-
                 $dataStmt = $pdo->query("SELECT * FROM `{$tableName}`");
                 $rowCount = 0;
-
                 while ($row = $dataStmt->fetch(PDO::FETCH_ASSOC)) {
                     $rowCount++;
                     $columns = [];
@@ -197,7 +161,6 @@ try {
                             $values[] = $pdo->quote($value);
                         }
                     }
-
                     $insertLine = sprintf(
                         "INSERT INTO `%s` (%s) VALUES (%s);\n",
                         $tableName,
@@ -206,36 +169,29 @@ try {
                     );
                     fwrite($handle, $insertLine);
                 }
-
                 fwrite($handle, "\n");
             }
-
             fwrite($handle, "SET FOREIGN_KEY_CHECKS=1;\n");
             fclose($handle);
-
             return true;
         } catch (Throwable $throwable) {
             logException($throwable, ['function' => 'createSqlDump', 'database' => $databaseName]);
             return false;
         }
     }
-
     function addPathToZip(ZipArchive $zip, $path, $basePath)
     {
         $normalizedBase = rtrim($basePath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
-
         try {
             if (is_dir($path)) {
                 $files = new RecursiveIteratorIterator(
                     new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS),
                     RecursiveIteratorIterator::SELF_FIRST
                 );
-
                 $fileCount = 0;
                 foreach ($files as $file) {
                     $filePath = (string) $file;
                     $relativePath = ltrim(str_replace($normalizedBase, '', $filePath), DIRECTORY_SEPARATOR);
-
                     if ($file->isDir()) {
                         $zip->addEmptyDir($relativePath);
                     } elseif ($file->isFile()) {
@@ -251,43 +207,36 @@ try {
             logException($e, ['function' => 'addPathToZip', 'path' => $path]);
         }
     }
-
     $reportbackup = select("topicid", "idreport", "report", "backupfile", "select")['idreport'];
     $destination = __DIR__;
     $setting = select("setting", "*");
     $sourcefir = dirname($destination);
     $botlist = select("botsaz", "*", null, null, "fetchAll");
-
     if ($botlist) {
         foreach ($botlist as $bot) {
             try {
                 $folderName = $bot['id_user'] . $bot['username'];
                 $botBasePath = $sourcefir . '/vpnbot/' . $folderName;
                 $zipFilePath = $destination . '/file_' . $folderName . '.zip';
-
                 $zip = new ZipArchive();
-
                 if ($zip->open($zipFilePath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true) {
                     $pathsToBackup = [
                         $botBasePath . '/data',
                         $botBasePath . '/product.json',
                         $botBasePath . '/product_name.json',
                     ];
-
                     foreach ($pathsToBackup as $path) {
                         if (file_exists($path)) {
                             addPathToZip($zip, $path, $botBasePath . '/');
                         }
                     }
                     $zip->close();
-
                     telegram('sendDocument', [
                         'chat_id' => $setting['Channel_Report'],
                         'message_thread_id' => $reportbackup,
                         'document' => new CURLFile($zipFilePath),
                         'caption' => "@{$bot['username']} | {$bot['id_user']}",
                     ]);
-
                     if (file_exists($zipFilePath)) {
                         unlink($zipFilePath);
                     }
@@ -302,19 +251,15 @@ try {
             }
         }
     }
-
     $backup_file_name = 'backup_' . date("Y-m-d") . '.sql';
     $zip_file_name = 'backup_' . date("Y-m-d") . '.zip';
-
     $dumpCreated = false;
     $command = "mysqldump -h localhost -u {$usernamedb} -p'{$passworddb}' --no-tablespaces {$dbname} > {$backup_file_name}";
-
     if (isExecAvailable()) {
         $output = [];
         $return_var = 0;
         exec($command, $output, $return_var);
         $dumpCreated = ($return_var === 0 && file_exists($backup_file_name));
-
         if (!$dumpCreated) {
             logMessage('ERROR', 'mysqldump command failed', [
                 'return_code' => $return_var,
@@ -322,14 +267,11 @@ try {
             ]);
         }
     }
-
     if (!$dumpCreated) {
         $dumpCreated = createSqlDump($pdoInstance, $dbname, $backup_file_name);
     }
-
     if (!$dumpCreated) {
         logMessage('CRITICAL', 'Failed to create database backup using any method');
-
         telegram('sendmessage', [
             'chat_id' => $setting['Channel_Report'],
             'message_thread_id' => $reportbackup,
@@ -337,26 +279,20 @@ try {
         ]);
         throw new RuntimeException('Database backup creation failed');
     }
-
     if (!file_exists($backup_file_name) || filesize($backup_file_name) === 0) {
         logMessage('ERROR', 'Backup file is empty or does not exist', ['file' => $backup_file_name]);
-
         telegram('sendmessage', [
             'chat_id' => $setting['Channel_Report'],
             'message_thread_id' => $reportbackup,
             'text' => "❌ فایل بکاپ ایجاد شده خالی است. لطفا بررسی شود.",
         ]);
-
         if (file_exists($backup_file_name)) {
             unlink($backup_file_name);
         }
-
         throw new RuntimeException('Backup file is empty');
     }
-
     if (!class_exists('ZipArchive')) {
         logMessage('CRITICAL', 'ZipArchive class not available');
-
         telegram('sendmessage', [
             'chat_id' => $setting['Channel_Report'],
             'message_thread_id' => $reportbackup,
@@ -364,40 +300,37 @@ try {
         ]);
         throw new RuntimeException('ZipArchive not available');
     }
-
     $zip = new ZipArchive();
     if ($zip->open($zip_file_name, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true) {
         $zip->addFile($backup_file_name, basename($backup_file_name));
         $zip->close();
-
         if (!file_exists($zip_file_name) || filesize($zip_file_name) === 0) {
             logMessage('ERROR', 'Zip file is empty or does not exist', ['file' => $zip_file_name]);
-
             telegram('sendmessage', [
                 'chat_id' => $setting['Channel_Report'],
                 'message_thread_id' => $reportbackup,
                 'text' => "❌ فایل فشرده‌ی بکاپ ایجاد نشد یا خالی است.",
             ]);
-
             if (file_exists($zip_file_name)) {
                 unlink($zip_file_name);
             }
             if (file_exists($backup_file_name)) {
                 unlink($backup_file_name);
             }
-
             throw new RuntimeException('Zip file creation failed');
         }
 
-telegram('sendDocument', [
-    'chat_id' => $setting['Channel_Report'],
-    'message_thread_id' => $reportbackup,
-    'document' => new CURLFile($zip_file_name),
-    'caption' => "<b>برای حمایت از این پروژه، لطفاً در گیت‌هاب به آن ستاره (Star) دهید.<br>
-    ⭐ <a href=\"https://github.com/Mmd-Amir/mirza_pro\">مشاهده پروژه در GitHub</a></b>",
-    'parse_mode' => 'HTML',
-]);
+        $sendResult = telegram('sendDocument', [
+            'chat_id' => $setting['Channel_Report'],
+            'message_thread_id' => $reportbackup,
+            'document' => new CURLFile($zip_file_name),
+            'caption' => "📦 خروجی دیتابیس ربات اصلی\n\nبرای حمایت از این پروژه، لطفاً در گیت‌هاب به آن ستاره (Star) دهید.\n⭐ https://github.com/Mmd-Amir/mirza_pro",
+        ]);
 
+        logMessage('INFO', 'Telegram sendDocument for DB backup attempted', [
+            'result' => $sendResult ? 'success' : 'failed',
+            'caption_length' => strlen("📦 خروجی دیتابیس ربات اصلی\n\nبرای حمایت از این پروژه، لطفاً در گیت‌هاب به آن ستاره (Star) دهید.\n⭐ https://github.com/Mmd-Amir/mirza_pro"),
+        ]);
         if (file_exists($zip_file_name)) {
             unlink($zip_file_name);
         }
@@ -408,7 +341,6 @@ telegram('sendDocument', [
         logMessage('ERROR', 'Failed to open zip file for writing', ['file' => $zip_file_name]);
         throw new RuntimeException('Zip file creation failed');
     }
-
 } catch (Throwable $e) {
     logException($e, ['script' => 'backup_main']);
 }
