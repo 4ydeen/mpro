@@ -5,14 +5,16 @@ $configDirectory = $rootDirectory.'config.php';
 $tablesDirectory = $rootDirectory.'table.php';
 if(!file_exists($configDirectory) || !file_exists($tablesDirectory)) {
     $ERROR[] = "فایل های پروژه ناقص هستند.";
-    $ERROR[] = "فایل های پروژه را مجددا دانلود و بارگذاری کنید (<a href='https://github.com/Mmd-Amir/mirza_pro2'>‎🌐 Github</a>)";
+    $ERROR[] = "فایل های پروژه را مجددا دانلود و بارگذاری کنید (<a href='https://github.com/Mmd-Amir/mirza_pro/releases/'>‎🌐 Github</a>)";
 }
 if(phpversion() < 8.2){
     $ERROR[] = "نسخه PHP شما باید حداقل 8.2 باشد.";
     $ERROR[] = "نسخه فعلی: ".phpversion();
     $ERROR[] = "لطفا نسخه PHP خود را به 8.2 یا بالاتر ارتقا دهید.";
 }
+
 $tempPath = dirname(dirname($_SERVER['SCRIPT_NAME']));
+
 $tempPath = str_replace('//', '/', '/' . trim($tempPath, '/'));
 $webAddress = rtrim($_SERVER['HTTP_HOST'] . $tempPath, '/') . '/';
 $success = false;
@@ -117,6 +119,57 @@ function splitSQLQueries($sql) {
         $queries[] = $trimmedQuery;
     }
     return $queries;
+}
+function dropExistingTables($mysqli, $dbName, $logHandle, &$ERROR = null) {
+    $log = function($message) use ($logHandle) {
+        if ($logHandle) {
+            $timestamp = date('Y-m-d H:i:s');
+            fwrite($logHandle, "[{$timestamp}] {$message}\n");
+        }
+    };
+    $log("\n🧨 حذف جداول و داده‌های فعلی...");
+    if(!$mysqli->query("SET FOREIGN_KEY_CHECKS=0")) {
+        $log("❌ عدم توانایی غیرفعال کردن FOREIGN_KEY_CHECKS: " . $mysqli->error);
+        if(is_array($ERROR)) {
+            $ERROR[] = "عدم توانایی غیرفعال کردن محدودیت‌های کلید خارجی پیش از حذف جداول.";
+        }
+        return false;
+    }
+    $dbNameSafe = $mysqli->real_escape_string($dbName);
+    $tablesResult = $mysqli->query("SHOW FULL TABLES FROM `{$dbNameSafe}`");
+    if(!$tablesResult) {
+        $log("❌ عدم توانایی دریافت لیست جداول: " . $mysqli->error);
+        $mysqli->query("SET FOREIGN_KEY_CHECKS=1");
+        if(is_array($ERROR)) {
+            $ERROR[] = "عدم توانایی مشاهده جداول فعلی جهت حذف.";
+        }
+        return false;
+    }
+    $droppedTables = 0;
+    $droppedViews = 0;
+    while($row = $tablesResult->fetch_array(MYSQLI_NUM)) {
+        $tableName = $row[0] ?? '';
+        if($tableName === '') continue;
+        $tableType = strtoupper($row[1] ?? 'BASE TABLE');
+        $dropQuery = $tableType === 'VIEW'
+            ? "DROP VIEW IF EXISTS `{$tableName}`"
+            : "DROP TABLE IF EXISTS `{$tableName}`";
+        if($mysqli->query($dropQuery)) {
+            if($tableType === 'VIEW') {
+                $droppedViews++;
+                $log("🗑️ DROP VIEW: {$tableName}");
+            } else {
+                $droppedTables++;
+                $log("🗑️ DROP TABLE: {$tableName}");
+            }
+        } else {
+            $log("❌ خطا در حذف {$tableType} {$tableName}: " . $mysqli->error);
+        }
+    }
+    $tablesResult->free();
+    $mysqli->query("SET FOREIGN_KEY_CHECKS=1");
+    $log("✅ مجموع جدول‌های حذف شده: {$droppedTables} | ویوها: {$droppedViews}");
+    return true;
 }
 function handleDatabaseImport($dbInfo, &$ERROR) {
     $debugFile = dirname(__DIR__) . '/backup_import_log_' . date('Y-m-d_H-i-s') . '.txt';
@@ -235,6 +288,11 @@ function handleDatabaseImport($dbInfo, &$ERROR) {
         writeLog($logHandle, "✅ اتصال برقرار شد");
         $mysqli->set_charset("utf8mb4");
         writeLog($logHandle, "✅ Charset: utf8mb4");
+        if(!dropExistingTables($mysqli, $dbInfo['name'], $logHandle, $ERROR)) {
+            writeLog($logHandle, "❌ عدم توانایی حذف داده‌های قبلی دیتابیس");
+            if($logHandle) fclose($logHandle);
+            return false;
+        }
         $mysqli->query("SET FOREIGN_KEY_CHECKS=0");
         writeLog($logHandle, "✅ FOREIGN_KEY_CHECKS = 0");
         $mysqli->query("SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO'");
@@ -243,33 +301,6 @@ function handleDatabaseImport($dbInfo, &$ERROR) {
         writeLog($logHandle, "✅ AUTOCOMMIT = 0");
         $mysqli->query("START TRANSACTION");
         writeLog($logHandle, "✅ Transaction شروع شد");
-
-        // Drop tables with content before import
-        writeLog($logHandle, "\n🗑️ بررسی و حذف جداول دارای محتوا...");
-        $tablesResult = $mysqli->query("SHOW TABLES");
-        $droppedTables = 0;
-        if ($tablesResult) {
-            while ($row = $tablesResult->fetch_array(MYSQLI_NUM)) {
-                $tableName = $row[0];
-                $countResult = $mysqli->query("SELECT COUNT(*) FROM `$tableName`");
-                if ($countResult) {
-                    $rowCount = $countResult->fetch_row()[0];
-                    if ($rowCount > 0) {
-                        if ($mysqli->query("DROP TABLE `$tableName`")) {
-                            writeLog($logHandle, "✅ جدول '$tableName' حذف شد (تعداد رکوردها: $rowCount)");
-                            $droppedTables++;
-                        } else {
-                            writeLog($logHandle, "❌ خطا در حذف جدول '$tableName': " . $mysqli->error);
-                            $ERROR[] = "خطا در حذف جدول '$tableName' قبل از ایمپورت.";
-                        }
-                    } else {
-                        writeLog($logHandle, "ℹ️ جدول '$tableName' خالی است (رکورد: $rowCount) - بدون تغییر");
-                    }
-                }
-            }
-        }
-        writeLog($logHandle, "📊 جداول حذف شده: $droppedTables");
-
         $successCount = 0;
         $failCount = 0;
         $errorMessages = [];
@@ -752,6 +783,7 @@ if(isset($uPOST['submit']) && $uPOST['submit']) {
         ];
         $replacementCount = 0;
         if ($serverType == 'server') {
+
             $serverConfigTemplate = '<?php
 $APIKEY = \'{API_KEY}\';
 $usernamedb = \'{username_db}\';
@@ -781,11 +813,12 @@ try {
             $newConfigData = str_replace(array_keys($replacements), array_values($replacements), $serverConfigTemplate);
             $replacementCount = count($replacements);
         } else {
+
             $newConfigData = updateConfigValues($rawConfigData, $replacements, $replacementCount);
         }
         if($replacementCount === 0 || file_put_contents($configDirectory,$newConfigData) === false) {
             $ERROR[] = '✏️❌ خطا در زمان بازنویسی اطلاعات فایل اصلی ربات';
-            $ERROR[] = "فایل های پروژه را مجددا دانلود و بارگذاری کنید (<a href='hhttps://github.com/Mmd-Amir/mirza_pro2'>‎🌐 Github</a>)";
+            $ERROR[] = "فایل های پروژه را مجددا دانلود و بارگذاری کنید (<a href='https://github.com/Mmd-Amir/mirza_pro/releases/'>‎🌐 Github</a>)";
     }
         else {
             $tableResult = getContents("https://".$document['address']."/table.php");
@@ -1016,24 +1049,24 @@ try {
         <?php endif; ?>
         <form id="installer-form" <?php if($success) { echo 'style="display:none;"'; } ?> method="post" enctype="multipart/form-data">
             <div class="server-type-selector">
-                <div class="server-type-card active" onclick="selectServerType('cpanel')">
+                <div class="server-type-card active" data-server-type="cpanel">
                     <input type="radio" name="server_type" value="cpanel" id="cpanel" checked>
                     <h3><i class="fas fa-server"></i> هاست cPanel</h3>
                     <p>نصب روی هاست cPanel</p>
                 </div>
-                <div class="server-type-card" onclick="selectServerType('server')">
+                <div class="server-type-card" data-server-type="server">
                     <input type="radio" name="server_type" value="server" id="server">
                     <h3><i class="fas fa-cloud"></i> سرور</h3>
                     <p>نصب روی سرور (مسیر: /var/www/html/mirzabotconfig)</p>
                 </div>
             </div>
             <div class="install-type-selector" id="install-type-selector">
-                <div class="install-type-card active" onclick="selectInstallType('simple')">
+                <div class="install-type-card active" data-install-type="simple">
                     <input type="radio" name="install_type" value="simple" id="simple" checked>
                     <h3><i class="fas fa-download"></i> نصب ساده</h3>
                     <p>نصب جدید بدون داده قبلی</p>
                 </div>
-                <div class="install-type-card" onclick="selectInstallType('migrate_free_to_pro')">
+                <div class="install-type-card" data-install-type="migrate_free_to_pro">
                     <input type="radio" name="install_type" value="migrate_free_to_pro" id="migrate_free_to_pro">
                     <h3><i class="fas fa-arrow-up"></i> مهاجرت رایگان به پرو</h3>
                     <p>انتقال از نسخه رایگان به پرو</p>
@@ -1045,10 +1078,10 @@ try {
                     آیا دیتابیس بکاپ از قبل وارد شده است
                 </h3>
                 <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-top: 20px;">
-                    <button type="button" class="backup-btn" data-value="yes" onclick="handleBackupChoice('yes')">
+                    <button type="button" class="backup-btn" data-value="yes">
                         <i class="fas fa-check"></i> بله، از قبل وارد کرده‌ام
                     </button>
-                    <button type="button" class="backup-btn active" data-value="no" onclick="handleBackupChoice('no')">
+                    <button type="button" class="backup-btn active" data-value="no">
                         <i class="fas fa-upload"></i> خیر، نیاز به آپلود دارم
                     </button>
                 </div>
@@ -1103,88 +1136,122 @@ try {
             <button type="submit" name="submit" value="submit"><i class="fas fa-rocket"></i> نصب ربات</button>
         </form>
         <footer>
-            <p>MirzabotPro Installer , Made by ♥️ | <a href="https://github.com/Mmd-Amir/mirza_pro2">Github</a> | <a href="https://t.me/+TDJJIwuYUsozMzI0">Telegram</a> | &copy; <?php echo date('Y'); ?></p>
+            <p>MirzabotPro Installer , Made by ♥️ | <a href="https://github.com/Mmd-Amir/mirza_pro/releases/">Github</a> | <a href="https://t.me/+TDJJIwuYUsozMzI0">Telegram</a> | &copy; <?php echo date('Y'); ?></p>
         </footer>
     </div>
     <script>
         function selectServerType(type) {
-            var cpanelEl = document.getElementById('cpanel');
-            var serverEl = document.getElementById('server');
-            if (cpanelEl) cpanelEl.checked = (type === 'cpanel');
-            if (serverEl) serverEl.checked = (type === 'server');
-            document.querySelectorAll('.server-type-card').forEach(function(card) {
-                card.classList.remove('active');
+            var serverInputs = document.querySelectorAll('input[name="server_type"]');
+            serverInputs.forEach(function(input) {
+                input.checked = (input.value === type);
             });
-            event.currentTarget.classList.add('active');
+            document.querySelectorAll('.server-type-card').forEach(function(card) {
+                card.classList.toggle('active', card.dataset.serverType === type);
+            });
             updateInstallTypes();
         }
-        function selectInstallType(type) {
-            var simpleEl = document.getElementById('simple');
-            var freeEl = document.getElementById('migrate_free_to_pro');
-            if (simpleEl) simpleEl.checked = (type === 'simple');
-            if (freeEl) freeEl.checked = (type === 'migrate_free_to_pro');
-            document.querySelectorAll('.install-type-card').forEach(function(card) {
-                card.classList.remove('active');
+        function selectInstallType(type, skipToggle) {
+            var installInputs = document.querySelectorAll('input[name="install_type"]');
+            installInputs.forEach(function(input) {
+                input.checked = (input.value === type);
             });
-            if (event && event.currentTarget) {
-                event.currentTarget.classList.add('active');
-            }
+            document.querySelectorAll('.install-type-card').forEach(function(card) {
+                card.classList.toggle('active', card.dataset.installType === type);
+            });
+            var requiresMigration = (type === 'migrate_free_to_pro');
             var dbQuestion = document.getElementById('db-backup-question');
             var migrationSection = document.getElementById('migration-section');
-            if (type === 'migrate_free_to_pro') {
-                if (dbQuestion) dbQuestion.style.display = 'block';
+            if (dbQuestion) {
+                dbQuestion.style.display = requiresMigration ? 'block' : 'none';
+            }
+            if (requiresMigration) {
+                var hasBackupInput = document.getElementById('has_db_backup');
+                var currentValue = hasBackupInput ? hasBackupInput.value : 'no';
+                handleBackupChoice(currentValue, true);
+            }
+            if (!requiresMigration && migrationSection) {
+                migrationSection.classList.remove('active');
+                migrationSection.style.display = 'none';
+            }
+            if (!skipToggle) {
                 toggleBackupUpload();
-            } else {
-                if (dbQuestion) dbQuestion.style.display = 'none';
-                if (migrationSection) migrationSection.style.display = 'none';
             }
         }
         function updateInstallTypes() {
-            var serverType = document.querySelector('input[name="server_type"]:checked').value;
-            var simpleCard = document.querySelector('input[value="simple"]').parentElement;
-            var freeCard = document.querySelector('input[value="migrate_free_to_pro"]').parentElement;
-            var installSelector = document.getElementById('install-type-selector');
+            var serverInput = document.querySelector('input[name="server_type"]:checked');
+            var serverType = serverInput ? serverInput.value : 'cpanel';
+            var simpleCard = document.querySelector('.install-type-card[data-install-type="simple"]');
+            var migrateCard = document.querySelector('.install-type-card[data-install-type="migrate_free_to_pro"]');
+            var hasBackupInput = document.getElementById('has_db_backup');
             if (serverType === 'server') {
-                simpleCard.style.display = 'none';
-                freeCard.style.display = 'block';
-                freeCard.classList.add('active');
-                document.getElementById('migrate_free_to_pro').checked = true;
-                document.getElementById('db-backup-question').style.display = 'block';
-                document.getElementById('migration-section').classList.add('active');
-                document.getElementById('has_db_backup').value = 'no';
-                document.querySelector('.backup-btn[data-value="no"]').classList.add('active');
-                document.querySelector('.backup-btn[data-value="yes"]').classList.remove('active');
+                if (simpleCard) simpleCard.style.display = 'none';
+                if (migrateCard) migrateCard.style.display = 'block';
+                if (hasBackupInput) hasBackupInput.value = 'no';
+                handleBackupChoice('no', true);
+                selectInstallType('migrate_free_to_pro', true);
+                toggleBackupUpload();
             } else {
-                simpleCard.style.display = 'block';
-                freeCard.style.display = 'block';
-                simpleCard.classList.add('active');
-                document.getElementById('simple').checked = true;
-                document.getElementById('db-backup-question').style.display = 'none';
-                document.getElementById('migration-section').classList.remove('active');
+                if (simpleCard) simpleCard.style.display = 'block';
+                if (migrateCard) migrateCard.style.display = 'block';
+                selectInstallType('simple', true);
+                var migrationSection = document.getElementById('migration-section');
+                if (migrationSection) {
+                    migrationSection.classList.remove('active');
+                    migrationSection.style.display = 'none';
+                }
+                if (hasBackupInput) hasBackupInput.value = 'no';
+                document.querySelectorAll('.backup-btn').forEach(function(btn) {
+                    btn.classList.remove('active');
+                });
+                toggleBackupUpload();
             }
         }
-        function handleBackupChoice(value) {
-            document.getElementById('has_db_backup').value = value;
+        function handleBackupChoice(value, skipToggle) {
+            var hasBackupInput = document.getElementById('has_db_backup');
+            if (hasBackupInput) {
+                hasBackupInput.value = value;
+            }
             document.querySelectorAll('.backup-btn').forEach(function(btn) {
-                btn.classList.remove('active');
+                btn.classList.toggle('active', btn.dataset.value === value);
             });
-            event.currentTarget.classList.add('active');
-            toggleBackupUpload();
+            if (!skipToggle) {
+                toggleBackupUpload();
+            }
         }
         function toggleBackupUpload() {
             var installType = document.querySelector('input[name="install_type"]:checked');
-            var hasBackup = document.getElementById('has_db_backup').value;
+            var hasBackupInput = document.getElementById('has_db_backup');
+            var hasBackup = hasBackupInput ? hasBackupInput.value : 'no';
             var migrationSection = document.getElementById('migration-section');
             if (!installType) return;
             var isMigration = (installType.value === 'migrate_free_to_pro');
             var needsUpload = (hasBackup === 'no');
             if (isMigration && needsUpload) {
-                if (migrationSection) migrationSection.classList.add('active');
+                if (migrationSection) {
+                    migrationSection.classList.add('active');
+                    migrationSection.style.display = 'block';
+                }
             } else if (migrationSection) {
                 migrationSection.classList.remove('active');
+                migrationSection.style.display = 'none';
             }
         }
         document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.server-type-card').forEach(function(card) {
+                card.addEventListener('click', function() {
+                    selectServerType(card.dataset.serverType);
+                });
+            });
+            document.querySelectorAll('.install-type-card').forEach(function(card) {
+                card.addEventListener('click', function() {
+                    selectInstallType(card.dataset.installType);
+                });
+            });
+            document.querySelectorAll('.backup-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    handleBackupChoice(btn.dataset.value);
+                });
+            });
             updateInstallTypes();
         });
     </script>
