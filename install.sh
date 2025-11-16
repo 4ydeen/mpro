@@ -35,7 +35,7 @@ function show_animated_logo() {
     type_text_colored "\033[1;31m" "██║░╚═╝░██║ ██║ ██║░░██║ ███████╗ ██║░░██║ ██║░░░░░ ██║░░██║ ╚█████╔╝" 0.003
     type_text_colored "\033[1;31m" "╚═╝░░░░░╚═╝ ╚═╝ ╚═╝░░╚═╝ ╚══════╝ ╚═╝░░╚═╝ ╚═╝░░░░░ ╚═╝░░╚═╝ ░╚════╝░" 0.003
     echo ""
-    type_text_colored "\033[1;33m" "                    Mirza Pro Bot Installer v2.7" 0.015
+    type_text_colored "\033[1;33m" "                    Mirza Pro Bot Installer v2.8" 0.015
     type_text_colored "\033[1;36m" "                    Developer: Mahdi" 0.015
     type_text_colored "\033[1;36m" "                    github.com/Mmd-Amir/mirza_pro" 0.015
     echo ""
@@ -115,9 +115,9 @@ function immigration_install() {
     type_text_colored "\033[1;33m" "Scanning for installed bots in /var/www/html/..."
     echo ""
 
-    BOT_DIRS=$(ls -d /var/www/html/*/ 2>/dev/null | xargs -r -n 1 basename)
+    mapfile -t BOT_CONFIGS < <(find /var/www/html -maxdepth 4 -type f -name config.php -print 2>/dev/null | sort)
 
-    if [ -z "$BOT_DIRS" ]; then
+    if [ ${#BOT_CONFIGS[@]} -eq 0 ]; then
         type_text_colored "\033[1;31m" "✗ No bots found in /var/www/html/"
         echo ""
         read -p "Press Enter to return to main menu..."
@@ -125,7 +125,7 @@ function immigration_install() {
         return 1
     fi
 
-    BOT_COUNT=$(echo "$BOT_DIRS" | wc -l)
+    BOT_COUNT=${#BOT_CONFIGS[@]}
     type_text_colored "\033[1;32m" "✓ Found $BOT_COUNT bot(s) installed"
     echo ""
     echo ""
@@ -133,20 +133,24 @@ function immigration_install() {
     PROCESSED=0
     ERRORS=0
 
-    for BOT_NAME in $BOT_DIRS; do
-        BOT_PATH="/var/www/html/$BOT_NAME"
-        CONFIG_FILE="$BOT_PATH/config.php"
-
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        type_text_colored "\033[1;36m" "Processing bot: $BOT_NAME" 0.03
-        echo ""
-
+    for CONFIG_FILE in "${BOT_CONFIGS[@]}"; do
+        [ -z "$CONFIG_FILE" ] && continue
         if [ ! -f "$CONFIG_FILE" ]; then
-            type_text_colored "\033[1;31m" "  ✗ config.php not found, skipping..."
-            echo ""
-            ((ERRORS++))
             continue
         fi
+        BOT_PATH="$(dirname "$CONFIG_FILE")"
+        RELATIVE_PATH="${BOT_PATH#/var/www/html/}"
+        if [ "$BOT_PATH" = "/var/www/html" ]; then
+            BOT_LABEL="/var/www/html"
+        elif [ -z "$RELATIVE_PATH" ] || [ "$RELATIVE_PATH" = "$BOT_PATH" ]; then
+            BOT_LABEL="$(basename "$BOT_PATH")"
+        else
+            BOT_LABEL="$RELATIVE_PATH"
+        fi
+
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        type_text_colored "\033[1;36m" "Processing bot: $BOT_LABEL" 0.03
+        echo ""
 
         DOMAIN=$(grep -oP "\$domainhosts\s*=\s*[\'\"]\K[^\'\"]+" "$CONFIG_FILE" 2>/dev/null | head -1)
 
@@ -197,12 +201,11 @@ function immigration_install() {
         type_text_colored "\033[1;32m" "  ✓ Permissions set successfully" 0.03
         echo ""
 
-        BASE_DOMAIN=$(echo "$DOMAIN" | sed "s|/.*||")
-
-        if [ "$BOT_NAME" = "mirzabotconfig" ]; then
-            INSTALLER_URL="https://$BASE_DOMAIN/mirzabotconfig/installer/"
+        DOMAIN_TRIMMED="${DOMAIN%/}"
+        if [[ "$DOMAIN_TRIMMED" =~ ^https?:// ]]; then
+            INSTALLER_URL="${DOMAIN_TRIMMED}/installer/"
         else
-            INSTALLER_URL="https://$BASE_DOMAIN/$BOT_NAME/installer/"
+            INSTALLER_URL="https://${DOMAIN_TRIMMED}/installer/"
         fi
 
         type_text_colored "\033[1;36m" "  📎 Installer URL:" 0.03
