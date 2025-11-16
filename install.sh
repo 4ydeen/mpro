@@ -3,6 +3,41 @@ if [[ $EUID -ne 0 ]]; then
     echo -e "\033[31m[ERROR]\033[0m Please run this script as \033[1mroot\033[0m."
     exit 1
 fi
+
+LOG_FILE="/var/log/mirza_installer.log"
+
+init_logging() {
+    local log_dir
+    log_dir="$(dirname "$LOG_FILE")"
+    [ -d "$log_dir" ] || mkdir -p "$log_dir"
+    [ -f "$LOG_FILE" ] || touch "$LOG_FILE"
+    chmod 600 "$LOG_FILE"
+}
+
+log_message() {
+    local level="$1"; shift
+    local message="$*"
+    local timestamp
+    local color
+    timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+    case "$level" in
+        INFO) color="\033[1;34m" ;;
+        WARN) color="\033[1;33m" ;;
+        ERROR) color="\033[1;31m" ;;
+        ACTION) color="\033[1;36m" ;;
+        *) color="\033[0m" ;;
+    esac
+    echo -e "${color}[${level}]\033[0m $message"
+    printf '%s [%s] %s\n' "$timestamp" "$level" "$message" >>"$LOG_FILE"
+}
+
+log_action() { log_message "ACTION" "$@"; }
+log_info() { log_message "INFO" "$@"; }
+log_warn() { log_message "WARN" "$@"; }
+log_error() { log_message "ERROR" "$@"; }
+
+init_logging
+log_info "Mirza installer initialized (PID $$)"
 type_text() {
     local text="$1"
     local delay="${2:-0.03}"
@@ -71,6 +106,67 @@ check_bot_status() {
         check_ssl_status
     else
         echo -e "\033[31m❌ Bot is not installed\033[0m"
+    fi
+}
+
+configure_apache_vhost() {
+    local domain="$1"
+    local docroot="${2:-/var/www/html}"
+    local conf="/etc/apache2/sites-available/${domain}.conf"
+
+    if [ -z "$domain" ]; then
+        echo -e "\033[31m[ERROR] Domain name missing while configuring Apache.\033[0m"
+        return 1
+    fi
+
+    echo -e "\033[33mConfiguring Apache virtual host for ${domain} (DocumentRoot: ${docroot})...\033[0m"
+    sudo tee "$conf" >/dev/null <<EOF
+<VirtualHost *:80>
+    ServerName $domain
+    DocumentRoot $docroot
+
+    <Directory $docroot>
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog \${APACHE_LOG_DIR}/${domain}-error.log
+    CustomLog \${APACHE_LOG_DIR}/${domain}-access.log combined
+</VirtualHost>
+EOF
+
+    if ! sudo a2ensite "${domain}.conf" >/dev/null 2>&1; then
+        echo -e "\033[31m[ERROR] Failed to enable Apache site for ${domain}.\033[0m"
+        return 1
+    fi
+
+    if ! sudo apache2ctl configtest >/dev/null 2>&1; then
+        echo -e "\033[31m[ERROR] Apache configuration test failed after adding ${domain}.\033[0m"
+        return 1
+    fi
+
+    return 0
+}
+
+cleanup_apache_state() {
+    if pgrep -x apache2 >/dev/null 2>&1 && ! sudo systemctl is-active --quiet apache2; then
+        echo -e "\033[33m[INFO] Detected Apache running outside systemd. Stopping stale process...\033[0m"
+        sudo apachectl stop >/dev/null 2>&1 || sudo pkill -TERM apache2 >/dev/null 2>&1
+        sudo rm -f /var/run/apache2/apache2.pid >/dev/null 2>&1
+    fi
+}
+
+restore_apache_service() {
+    cleanup_apache_state
+    echo -e "\033[33mRe-enabling Apache service...\033[0m"
+    sudo systemctl enable apache2 >/dev/null 2>&1 || echo -e "\033[33m[INFO] Apache service was already disabled.\033[0m"
+    echo -e "\033[33mStarting Apache service...\033[0m"
+    if ! sudo systemctl start apache2; then
+        echo -e "\033[33m[WARN] Apache failed to start cleanly, retrying after cleanup...\033[0m"
+        cleanup_apache_state
+        if ! sudo systemctl start apache2; then
+            echo -e "\033[31m[ERROR] Failed to start Apache service!\033[0m"
+        fi
     fi
 }
 
@@ -2025,31 +2121,35 @@ function manage_additional_bots() {
     esac
 }
 function change_domain() {
-    local new_domain
+    local new_domain current_domainhosts sanitized_value path_segment full_domain_path WEBHOOK_URL webhook_response http_status updated_domainhosts
+    full_domain_path=""
+    WEBHOOK_URL=""
     while [[ ! "$new_domain" =~ ^[a-zA-Z0-9.-]+$ ]]; do
         read -p "Enter new domain: " new_domain
         [[ ! "$new_domain" =~ ^[a-zA-Z0-9.-]+$ ]] && echo -e "\033[31mInvalid domain format\033[0m"
     done
 
-    echo -e "\033[33mStopping Apache to configure SSL...\033[0m"
+    log_action "Disabling Apache service before domain change..."
+    sudo systemctl disable apache2 >/dev/null 2>&1 || true
+
+    if ! configure_apache_vhost "$new_domain"; then
+        log_error "Unable to prepare Apache virtual host for ${new_domain}."
+        restore_apache_service
+        return 1
+    fi
+
+    log_action "Stopping Apache to configure SSL..."
     if ! sudo systemctl stop apache2; then
-        echo -e "\033[31m[ERROR] Failed to stop Apache!\033[0m"
+        log_error "Failed to stop Apache while preparing SSL for ${new_domain}."
+        restore_apache_service
         return 1
     fi
 
-    echo -e "\033[33mConfiguring SSL for new domain...\033[0m"
+    log_action "Configuring SSL certificate for ${new_domain}..."
     if ! sudo certbot --apache --redirect --agree-tos --preferred-challenges http -d "$new_domain"; then
-        echo -e "\033[31m[ERROR] SSL configuration failed!\033[0m"
-        echo -e "\033[33mCleaning up...\033[0m"
+        log_error "SSL configuration failed for ${new_domain}, rolling back certificate changes."
         sudo certbot delete --cert-name "$new_domain" 2>/dev/null
-        echo -e "\033[33mRestarting Apache after cleanup...\033[0m"
-        sudo systemctl start apache2 || echo -e "\033[31m[ERROR] Failed to restart Apache!\033[0m"
-        return 1
-    fi
-
-    echo -e "\033[33mRestarting Apache after SSL configuration...\033[0m"
-    if ! sudo systemctl start apache2; then
-        echo -e "\033[31m[ERROR] Failed to restart Apache!\033[0m"
+        restore_apache_service
         return 1
     fi
 
@@ -2057,33 +2157,73 @@ function change_domain() {
     if [ -f "$CONFIG_FILE" ]; then
         sudo cp "$CONFIG_FILE" "$CONFIG_FILE.$(date +%s).bak"
 
-        sudo sed -i "s|\$domainhosts = '.*';|\$domainhosts = '${new_domain}';|" "$CONFIG_FILE"
+        current_domainhosts=$(awk -F"'" '/\$domainhosts/{print $2}' "$CONFIG_FILE" | head -1)
+        sanitized_value=${current_domainhosts#http://}
+        sanitized_value=${sanitized_value#https://}
+        sanitized_value=${sanitized_value#/}
+        path_segment=""
+        if [[ "$sanitized_value" == */* ]]; then
+            path_segment=${sanitized_value#*/}
+            path_segment=${path_segment%/}
+        fi
+
+        if [ -z "$path_segment" ] && [ -d "/var/www/html/mirzabotconfig" ]; then
+            path_segment="mirzabotconfig"
+            log_info "No path segment detected in existing domain. Using default path '/mirzabotconfig'."
+        fi
+
+        if [ -n "$path_segment" ]; then
+            full_domain_path="${new_domain}/${path_segment}"
+        else
+            full_domain_path="${new_domain}"
+        fi
+
+        sudo sed -i "s|\$domainhosts = '.*';|\$domainhosts = '${full_domain_path}';|" "$CONFIG_FILE"
 
         NEW_SECRET=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9')
-        sudo sed -i "s/\$secrettoken = '.*';/\$secrettoken = '${NEW_SECRET%%}';/" "$CONFIG_FILE"
+        sudo sed -i "s|\$secrettoken = '.*';|\$secrettoken = '${NEW_SECRET}';|" "$CONFIG_FILE"
 
         BOT_TOKEN=$(awk -F"'" '/\$APIKEY/{print $2}' "$CONFIG_FILE")
-        curl -s -o /dev/null -F "url=https://${new_domain}/index.php" \
-             -F "secret_token=${NEW_SECRET}" \
-             "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" || {
-            echo -e "\033[33m[WARNING] Webhook update failed\033[0m"
-        }
+        updated_domainhosts=$(awk -F"'" '/\$domainhosts/{print $2}' "$CONFIG_FILE" | head -1)
+        updated_domainhosts=${updated_domainhosts%/}
+        if [[ "$updated_domainhosts" =~ ^https?:// ]]; then
+            WEBHOOK_URL="${updated_domainhosts}/index.php"
+        else
+            WEBHOOK_URL="https://${updated_domainhosts}/index.php"
+        fi
+
+        webhook_response=$(curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+            -F "url=${WEBHOOK_URL}" \
+            -F "secret_token=${NEW_SECRET}")
+
+        if echo "$webhook_response" | grep -q '"ok":true'; then
+            log_info "Telegram webhook updated successfully for ${new_domain}."
+        else
+            log_warn "Webhook update returned a warning: ${webhook_response}"
+        fi
     else
-        echo -e "\033[31m[CRITICAL] Config file missing!\033[0m"
+        log_error "Config file missing at ${CONFIG_FILE}; aborting domain change."
+        restore_apache_service
         return 1
     fi
 
-    if curl -sI "https://${new_domain}" | grep -q "200 OK"; then
-        echo -e "\033[32mDomain successfully migrated to ${new_domain}\033[0m"
-        echo -e "\033[33mOld domain configuration has been automatically cleaned up\033[0m"
+    local attempt http_status=""
+    for attempt in {1..5}; do
+        http_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$WEBHOOK_URL")
+        if [[ "$http_status" =~ ^(200|301|302)$ ]]; then
+            break
+        fi
+        log_warn "Endpoint ${WEBHOOK_URL} not ready yet (HTTP ${http_status:-000}). Retrying in 3 seconds..."
+        sleep 3
+    done
+
+    if [[ "$http_status" =~ ^(200|301|302)$ ]]; then
+        log_info "Domain successfully migrated to ${full_domain_path}. Old configuration cleaned up."
     else
-        echo -e "\033[31m[WARNING] Final verification failed!\033[0m"
-        echo -e "\033[33mPlease check:\033[0m"
-        echo -e "1. DNS settings for ${new_domain}"
-        echo -e "2. Apache virtual host configuration"
-        echo -e "3. Firewall settings"
-        return 1
+        log_warn "Final verification failed for ${WEBHOOK_URL} (HTTP ${http_status:-000}). Please verify DNS, Apache vhost, and firewall."
     fi
+
+    restore_apache_service
 }
 function install_additional_bot() {
     clear
