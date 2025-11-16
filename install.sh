@@ -117,7 +117,15 @@ function immigration_install() {
 
     mapfile -t BOT_CONFIGS < <(find /var/www/html -maxdepth 4 -type f -name config.php -print 2>/dev/null | sort)
 
-    if [ ${#BOT_CONFIGS[@]} -eq 0 ]; then
+    VALID_CONFIGS=()
+    for CONFIG_CHECK in "${BOT_CONFIGS[@]}"; do
+        [ -z "$CONFIG_CHECK" ] && continue
+        if grep -q '\$domainhosts' "$CONFIG_CHECK" 2>/dev/null; then
+            VALID_CONFIGS+=("$CONFIG_CHECK")
+        fi
+    done
+
+    if [ ${#VALID_CONFIGS[@]} -eq 0 ]; then
         type_text_colored "\033[1;31m" "✗ No bots found in /var/www/html/"
         echo ""
         read -p "Press Enter to return to main menu..."
@@ -125,7 +133,7 @@ function immigration_install() {
         return 1
     fi
 
-    BOT_COUNT=${#BOT_CONFIGS[@]}
+    BOT_COUNT=${#VALID_CONFIGS[@]}
     type_text_colored "\033[1;32m" "✓ Found $BOT_COUNT bot(s) installed"
     echo ""
     echo ""
@@ -133,7 +141,7 @@ function immigration_install() {
     PROCESSED=0
     ERRORS=0
 
-    for CONFIG_FILE in "${BOT_CONFIGS[@]}"; do
+    for CONFIG_FILE in "${VALID_CONFIGS[@]}"; do
         [ -z "$CONFIG_FILE" ] && continue
         if [ ! -f "$CONFIG_FILE" ]; then
             continue
@@ -148,10 +156,6 @@ function immigration_install() {
             BOT_LABEL="$RELATIVE_PATH"
         fi
 
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        type_text_colored "\033[1;36m" "Processing bot: $BOT_LABEL" 0.03
-        echo ""
-
         DOMAIN=$(grep -oP "\$domainhosts\s*=\s*[\'\"]\K[^\'\"]+" "$CONFIG_FILE" 2>/dev/null | head -1)
 
         if [ -z "$DOMAIN" ]; then
@@ -159,11 +163,12 @@ function immigration_install() {
         fi
 
         if [ -z "$DOMAIN" ]; then
-            type_text_colored "\033[1;31m" "  ✗ Could not read domain from config.php"
-            echo ""
-            ((ERRORS++))
             continue
         fi
+
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        type_text_colored "\033[1;36m" "Processing bot: $BOT_LABEL" 0.03
+        echo ""
 
         type_text_colored "\033[1;32m" "  ✓ Domain detected: $DOMAIN" 0.03
         echo ""
@@ -197,6 +202,29 @@ function immigration_install() {
             ((ERRORS++))
             continue
         }
+
+        APP_DIR=""
+        if [[ "$BOT_PATH" == */app ]]; then
+            APP_DIR="$BOT_PATH"
+        elif [[ "$BOT_PATH" == */app/* ]]; then
+            APP_DIR="${BOT_PATH%%/app/*}/app"
+        fi
+
+        if [ -n "$APP_DIR" ] && [ -d "$APP_DIR" ]; then
+            type_text_colored "\033[1;33m" "  Applying permissions to app directory: $APP_DIR" 0.02
+            sudo chmod 755 "$APP_DIR" 2>/dev/null || {
+                type_text_colored "\033[1;31m" "  ✗ Failed to set directory permissions for app"
+                echo ""
+                ((ERRORS++))
+                continue
+            }
+            sudo chown -R www-data:www-data "$APP_DIR" 2>/dev/null || {
+                type_text_colored "\033[1;31m" "  ✗ Failed to set ownership for app directory"
+                echo ""
+                ((ERRORS++))
+                continue
+            }
+        fi
 
         type_text_colored "\033[1;32m" "  ✓ Permissions set successfully" 0.03
         echo ""
