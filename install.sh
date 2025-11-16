@@ -1010,7 +1010,6 @@ echo -e "$text_to_save" >> /var/www/html/mirzabotconfig/config.php
             echo -e "\e[33mDatabase username: \e[36m${dbuser}\033[0m"
             echo -e "\e[33mDatabase password: \e[36m${dbpass}\033[0m"
             echo " "
-            echo -e "Mirza Bot"
         fi
 
 
@@ -1023,7 +1022,7 @@ echo -e "$text_to_save" >> /var/www/html/mirzabotconfig/config.php
     fi
 
     chmod +x /root/install.sh
-    ln -vsf /root/install.sh /usr/local/bin/mirza
+    ln -sf /root/install.sh /usr/local/bin/mirza >/dev/null 2>&1
 
 }
 
@@ -1504,7 +1503,7 @@ EOF
     echo -e "\033[33mDatabase password: \033[36m$DB_PASSWORD\033[0m"
 
     chmod +x /root/install.sh
-    ln -vsf /root/install.sh /usr/local/bin/mirza
+    ln -sf /root/install.sh /usr/local/bin/mirza >/dev/null 2>&1
 }
 
 function update_bot() {
@@ -1621,7 +1620,7 @@ function update_bot() {
 
     if [ -f "/root/install.sh" ]; then
         sudo chmod +x /root/install.sh
-        sudo ln -vsf /root/install.sh /usr/local/bin/mirza
+        sudo ln -sf /root/install.sh /usr/local/bin/mirza >/dev/null 2>&1
         echo -e "\e[92mEnsured /root/install.sh is executable and 'mirza' command is linked.\033[0m"
     else
         echo -e "\e[91mError: /root/install.sh not found after update attempt. Cannot make it executable or link 'mirza' command.\033[0m"
