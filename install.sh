@@ -1023,7 +1023,7 @@ echo -e "$text_to_save" >> /var/www/html/mirzabotconfig/config.php
     fi
 
     chmod +x /root/install.sh
-    ln -vs /root/install.sh /usr/local/bin/mirza
+    ln -vsf /root/install.sh /usr/local/bin/mirza
 
 }
 
@@ -1504,7 +1504,7 @@ EOF
     echo -e "\033[33mDatabase password: \033[36m$DB_PASSWORD\033[0m"
 
     chmod +x /root/install.sh
-    ln -vs /root/install.sh /usr/local/bin/mirza
+    ln -vsf /root/install.sh /usr/local/bin/mirza
 }
 
 function update_bot() {
