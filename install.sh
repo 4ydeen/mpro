@@ -37,7 +37,7 @@ function show_animated_logo() {
     echo ""
     type_text_colored "\033[1;33m" "                    Mirza Pro Bot Installer v2.8" 0.015
     type_text_colored "\033[1;36m" "                    Developer: mahdiMGF2" 0.015
-    type_text_colored "\033[1;36m" "                    github.com/Mmd-Amir/mirza_pro" 0.015
+    type_text_colored "\033[1;36m" "                    debugger:  github.com/Mmd-Amir/mirza_pro" 0.015
     echo ""
 }
 
