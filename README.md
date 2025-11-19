@@ -65,7 +65,6 @@ https://domin.ir/botmirzapanel/installer
 
 ```
 bash -c "$(curl -L https://raw.githubusercontent.com/Mmd-Amir/mirza_pro/main/install.sh)"
-
 ```
 
 #### 2️⃣ سپس گزینه‌ٔ «2» را انتخاب نمایید تا فرآیند به‌روزرسانی انجام شود.
@@ -73,5 +72,24 @@ bash -c "$(curl -L https://raw.githubusercontent.com/Mmd-Amir/mirza_pro/main/ins
 #### 4️⃣ پس از دریافت آدرس وبی ارائه‌شده، وارد آن شوید، بخش « سرور » را انتخاب کنید و مراحل نصب را ادامه دهید.
 </details>
 
+---
 
+
+### **آموزش نصب سرور ( در صورتی که قبلا نصب نشده )**
+
+
+<details>
+  <summary> نصب سرور ساده  </summary>
+
+  #### 1️⃣ ابتدا اسکریپت زیر را بر روی سرور اجرا کنید.
+ ```
+  bash -c "$(curl -L https://raw.githubusercontent.com/Mmd-Amir/mirza_pro/main/install.sh)"
+```
+
+#### 2️⃣ سپس گزینهٔ «1» را انتخاب کرده و اطلاعات مورد نیاز را مطابق درخواست وارد نمایید.
+#### 3️⃣ در صورتی که به فرآیند مهاجرت نیاز ندارید، می‌توانید پوشه‌ی Installer را حذف کنید.
+#### 4️⃣ اگر قصد مهاجرت دارید، گزینهٔ «10» را اجرا کنید. پس از دریافت آدرس نصب‌کننده (Installer)، وارد آن شوید، بخش «Server» را انتخاب کنید و ادامه‌ی مراحل را مطابق راهنما  انجام دهید.
+
+  
+</details>
 
