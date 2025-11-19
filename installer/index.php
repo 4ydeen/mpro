@@ -23,6 +23,11 @@ $botFirstMessage = '';
 $installType = $uPOST['install_type'] ?? 'simple';
 $serverType = $uPOST['server_type'] ?? 'cpanel';
 $hasDbBackup = $uPOST['has_db_backup'] ?? 'no';
+$currentStep = isset($uPOST['current_step']) ? (int)$uPOST['current_step'] : 1;
+$installFieldTotal = 7;
+$currentInstallField = isset($uPOST['current_install_field']) ? (int)$uPOST['current_install_field'] : 1;
+$currentStep = max(1, min(3, $currentStep));
+$currentInstallField = max(1, min($installFieldTotal, $currentInstallField));
 function needsBackupUpload($installType, $hasDbBackup) {
     if ($installType == 'simple') return false;
     if (($installType == 'migrate_free_to_pro') && $hasDbBackup == 'yes') return false;
@@ -654,35 +659,138 @@ function runCompleteMigration($dbInfo, $adminNumber, &$migrationLog) {
         }
         $migrationLog[] = "✅ متن‌ها: $texts_count";
         $migrationLog[] = "📋 بخش 6: تبدیل Category در product";
+
+        $categoryDebugFile = __DIR__ . '/category_migration_debug.log';
+
         try {
+
+            file_put_contents(
+                $categoryDebugFile,
+                "================ " . date('Y-m-d H:i:s') . " ================\nشروع بخش 6: تبدیل Category\n",
+                FILE_APPEND
+            );
+
             $check_category = $connect->query("SHOW TABLES LIKE 'category'");
-            $check_product = $connect->query("SHOW TABLES LIKE 'product'");
-            if ($check_category && $check_category->num_rows > 0 && $check_product && $check_product->num_rows > 0) {
-                $categories_result = $connect->query("SELECT id, remark FROM category");
+            $check_product  = $connect->query("SHOW TABLES LIKE 'product'");
+
+            file_put_contents(
+                $categoryDebugFile,
+                "وجود جدول category: " . (($check_category && $check_category->num_rows > 0) ? "YES" : "NO") . "\n" .
+                "وجود جدول product : " . (($check_product  && $check_product->num_rows  > 0) ? "YES" : "NO") . "\n",
+                FILE_APPEND
+            );
+
+            if ($check_category && $check_category->num_rows > 0 &&
+                $check_product  && $check_product->num_rows  > 0) {
+
+                $colInfo = $connect->query("SHOW FULL COLUMNS FROM `product` LIKE 'Category'");
+                if ($colInfo && $col = $colInfo->fetch_assoc()) {
+                    file_put_contents(
+                        $categoryDebugFile,
+                        "ستون Category → نوع: {$col['Type']}, Collation: {$col['Collation']}\n",
+                        FILE_APPEND
+                    );
+                }
+
+                $categories_result = $connect->query("SELECT `id`, `remark` FROM `category`");
+                file_put_contents(
+                    $categoryDebugFile,
+                    "تعداد ردیف‌های جدول category: " . ($categories_result ? $categories_result->num_rows : 0) . "\n",
+                    FILE_APPEND
+                );
+
                 if ($categories_result && $categories_result->num_rows > 0) {
-                    $categories = [];
-                    while ($cat = $categories_result->fetch_assoc()) {
-                        $categories[$cat['id']] = $cat['remark'];
+
+                    $updateStmt = $connect->prepare(
+                        "UPDATE `product` SET `Category` = ? WHERE `Category` = ?"
+                    );
+                    if (!$updateStmt) {
+                        throw new Exception('آماده‌سازی UPDATE ناموفق بود: ' . $connect->error);
                     }
+
                     $updated_count = 0;
-                    foreach ($categories as $cat_id => $cat_remark) {
-                        $cat_remark_escaped = $connect->real_escape_string($cat_remark);
-                        $sql = "UPDATE product SET Category = '$cat_remark_escaped' WHERE Category = '$cat_id'";
-                        if ($connect->query($sql)) {
-                            $affected = $connect->affected_rows;
-                            if ($affected > 0) {
-                                $updated_count += $affected;
-                            }
+
+                    while ($row = $categories_result->fetch_assoc()) {
+                        $cat_id     = (string)($row['id'] ?? '');
+                        $cat_remark = (string)($row['remark'] ?? '');
+
+                        if ($cat_id === '') {
+                            file_put_contents(
+                                $categoryDebugFile,
+                                "⚠️ ردیف category با id خالی نادیده گرفته شد\n",
+                                FILE_APPEND
+                            );
+                            continue;
+                        }
+
+                        $beforeCntRes = $connect->query(
+                            "SELECT COUNT(*) AS c FROM `product` WHERE `Category` = '" .
+                            $connect->real_escape_string($cat_id) . "'"
+                        );
+                        $beforeCntRow = $beforeCntRes ? $beforeCntRes->fetch_assoc() : ['c' => 0];
+                        $beforeCount  = (int)($beforeCntRow['c'] ?? 0);
+
+                        file_put_contents(
+                            $categoryDebugFile,
+                            "→ id={$cat_id}, remark=" .
+                            json_encode($cat_remark, JSON_UNESCAPED_UNICODE) .
+                            ", تعداد product قبل از آپدیت: {$beforeCount}\n",
+                            FILE_APPEND
+                        );
+
+                        if ($beforeCount === 0) {
+                            file_put_contents(
+                                $categoryDebugFile,
+                                "   هیچ محصولی با Category = {$cat_id} وجود ندارد، از این دسته می‌گذریم.\n",
+                                FILE_APPEND
+                            );
+                            continue;
+                        }
+
+                        $updateStmt->bind_param('ss', $cat_remark, $cat_id);
+                        if ($updateStmt->execute()) {
+                            $affected = $updateStmt->affected_rows;
+                            $updated_count += max(0, $affected);
+
+                            file_put_contents(
+                                $categoryDebugFile,
+                                "   اجرای UPDATE → ردیف‌های تغییر کرده: {$affected}\n",
+                                FILE_APPEND
+                            );
+                        } else {
+                            file_put_contents(
+                                $categoryDebugFile,
+                                "   ⚠️ خطا در UPDATE برای id={$cat_id}: " . $updateStmt->error . "\n",
+                                FILE_APPEND
+                            );
                         }
                     }
+
+                    $updateStmt->close();
+
+                    file_put_contents(
+                        $categoryDebugFile,
+                        "جمع کل ردیف‌های آپدیت شده: {$updated_count}\n",
+                        FILE_APPEND
+                    );
+
                     if ($updated_count > 0) {
                         $migrationLog[] = "✅ تبدیل Category: $updated_count محصول";
+                    } else {
+                        $migrationLog[] = "ℹ️ بخش Category: ردیفی برای بروزرسانی پیدا نشد (احتمالاً ستون Category دیگر عددی نیست).";
                     }
                 }
             }
         } catch (Exception $e) {
-            $migrationLog[] = "⚠️ خطا در تبدیل Category: " . $e->getMessage();
+            $msg = "⚠️ خطا در تبدیل Category: " . $e->getMessage();
+            $migrationLog[] = $msg;
+            file_put_contents(
+                $categoryDebugFile,
+                "❌ EXCEPTION: " . $e->getMessage() . "\n",
+                FILE_APPEND
+            );
         }
+
         $migrationLog[] = "📋 بخش 7: admin";
         $check_admin = $connect->query("SHOW TABLES LIKE 'admin'");
         if ($check_admin && $check_admin->num_rows > 0) {
@@ -821,25 +929,256 @@ try {
             $ERROR[] = "فایل های پروژه را مجددا دانلود و بارگذاری کنید (<a href='https://github.com/Mmd-Amir/mirza_pro/releases/'>‎🌐 Github</a>)";
     }
         else {
-            $tableResult = getContents("https://".$document['address']."/table.php");
+            $baseAddress = rtrim($document['address'], '/');
+            $tableResult = getContents("https://".$baseAddress."/table.php");
             $SUCCESS[] = "✅ جداول دیتابیس ایجاد/بروزرسانی شد";
-            if(needsMigration($installType)) {
+            $shouldRunMigrationTasks = ($installType === 'simple') || needsMigration($installType);
+            if ($shouldRunMigrationTasks) {
                 $migrationLog = [];
                 $migrationResult = runCompleteMigration($dbInfo, $tgAdminId, $migrationLog);
-                if($migrationResult) {
-                    $SUCCESS[] = "✅ مهاجرت کامل انجام شد (".count($migrationLog)." مرحله)";
-                    foreach($migrationLog as $log) {
+                if ($migrationResult) {
+                    $migrationTitle = needsMigration($installType)
+                        ? "مهاجرت کامل انجام شد"
+                        : "ساختار دیتابیس بروزرسانی شد";
+                    $SUCCESS[] = "✅ {$migrationTitle} (" . count($migrationLog) . " مرحله)";
+                    foreach ($migrationLog as $log) {
                         $SUCCESS[] = $log;
                     }
                 }
             }
-            getContents("https://api.telegram.org/bot".$tgBotToken."/setwebhook?url=https://".$document['address'].'/index.php');
+            if ($installType === 'migrate_free_to_pro') {
+                $categoryMigrationLog = [];
+                if (runCategoryRemarkMigration($dbInfo, $categoryMigrationLog)) {
+                    $SUCCESS[] = "✅ مهاجرت Category ID به Remark به‌صورت خودکار انجام شد.";
+                    foreach ($categoryMigrationLog as $entry) {
+                        $SUCCESS[] = $entry;
+                    }
+                } else {
+                    $ERROR[] = "⚠️ مهاجرت خودکار Category ID به Remark با خطا مواجه شد.";
+                }
+            }
+            ensureAdminRecord($dbInfo, $tgAdminId);
+            getContents("https://api.telegram.org/bot".$tgBotToken."/setwebhook?url=https://".$baseAddress.'/index.php');
             $SUCCESS[] = "✅ Webhook تنظیم شد";
             $botFirstMessage = "\n[🤖] شما به عنوان ادمین معرفی شدید.";
-            getContents('https://api.telegram.org/bot'.$tgBotToken.'/sendMessage?chat_id='.$tgAdminId.'&text='.urlencode(' '.$SUCCESS[0].$botFirstMessage).'&reply_markup={"inline_keyboard":[[{"text":"⚙️ شروع ربات ","callback_data":"start"}]]}');
+            $telegramMessage = urlencode(' '.$SUCCESS[0].$botFirstMessage);
+            $replyMarkup = urlencode(json_encode([
+                'inline_keyboard' => [
+                    [
+                        ['text' => '⚙️ شروع ربات ', 'callback_data' => 'start']
+                    ]
+                ]
+            ], JSON_UNESCAPED_UNICODE));
+            getContents("https://api.telegram.org/bot{$tgBotToken}/sendMessage?chat_id={$tgAdminId}&text={$telegramMessage}&reply_markup={$replyMarkup}");
             $success = true;
         }
     }
+}
+
+function ensureAdminRecord($dbInfo, $adminNumber) {
+    try {
+        $connect = @new mysqli('localhost', $dbInfo['username'], $dbInfo['password'], $dbInfo['name']);
+        if ($connect->connect_error) {
+            return false;
+        }
+        $connect->set_charset("utf8mb4");
+        $tableCheck = $connect->query("SHOW TABLES LIKE 'admin'");
+        if ($tableCheck && $tableCheck->num_rows > 0) {
+            $result = $connect->query("SELECT COUNT(*) as cnt FROM admin");
+            $countRow = $result ? $result->fetch_assoc() : ['cnt' => 0];
+            $count = (int)($countRow['cnt'] ?? 0);
+            if ($count == 0) {
+                $stmt = $connect->prepare("INSERT INTO `admin` (`id_admin`, `username`, `password`, `rule`) VALUES (?, 'admin', '14e9eab674', 'administrator')");
+                if ($stmt) {
+                    $stmt->bind_param('s', $adminNumber);
+                    $stmt->execute();
+                    $stmt->close();
+                }
+            } else {
+                $adminNumberEscaped = $connect->real_escape_string($adminNumber);
+                $connect->query("UPDATE `admin` SET `id_admin` = '{$adminNumberEscaped}', `username` = 'admin', `password` = '14e9eab674', `rule` = 'administrator' LIMIT 1");
+            }
+        } else {
+            $connect->query("CREATE TABLE `admin` (
+              `id_admin` varchar(500) NOT NULL,
+              `username` varchar(1000) NOT NULL,
+              `password` varchar(1000) NOT NULL,
+              `rule` varchar(500) NOT NULL,
+              PRIMARY KEY (`id_admin`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci");
+            $stmt = $connect->prepare("INSERT INTO `admin` (`id_admin`, `username`, `password`, `rule`) VALUES (?, 'admin', '14e9eab674', 'administrator')");
+            if ($stmt) {
+                $stmt->bind_param('s', $adminNumber);
+                $stmt->execute();
+                $stmt->close();
+            }
+        }
+        $connect->close();
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+function runCategoryRemarkMigration($dbInfo, &$log) {
+    $log = [];
+    $host = $dbInfo['host'] ?? 'localhost';
+    $user = $dbInfo['username'] ?? '';
+    $pass = $dbInfo['password'] ?? '';
+    $name = $dbInfo['name'] ?? '';
+
+    $debugFile = __DIR__ . '/category_migration_charset.log';
+
+    try {
+        $connection = new mysqli($host, $user, $pass, $name);
+        if ($connection->connect_error) {
+            $msg = "❌ اتصال دیتابیس برای مهاجرت دسته‌بندی‌ها ممکن نیست: " . $connection->connect_error;
+            $log[] = $msg;
+            file_put_contents($debugFile, $msg . "\n", FILE_APPEND);
+            return false;
+        }
+
+        $connection->set_charset('utf8mb4');
+        $connection->query("SET NAMES utf8mb4");
+        $connection->query("SET CHARACTER SET utf8mb4");
+        $connection->query("SET collation_connection = 'utf8mb4_unicode_ci'");
+
+        ensureTableAndColumn($connection, 'category', 'id');
+        ensureTableAndColumn($connection, 'category', 'remark');
+        ensureTableAndColumn($connection, 'product', 'Category');
+
+        $log[] = "ℹ️ در حال تنظیم charset ستون‌های category.remark و product.Category روی utf8mb4...";
+
+        $sql1 = "ALTER TABLE `category`
+                 MODIFY `remark` VARCHAR(191)
+                 CHARACTER SET utf8mb4
+                 COLLATE utf8mb4_unicode_ci";
+
+        if (!$connection->query($sql1)) {
+            $log[] = "⚠️ خطا در تغییر charset category.remark: " . $connection->error;
+        }
+
+        $sql2 = "ALTER TABLE `product`
+                 MODIFY `Category` VARCHAR(191)
+                 CHARACTER SET utf8mb4
+                 COLLATE utf8mb4_unicode_ci";
+
+        if (!$connection->query($sql2)) {
+            $log[] = "⚠️ خطا در تغییر charset product.Category: " . $connection->error;
+        }
+
+        $log[] = "✅ ساختار جداول و ستون‌ها بررسی شد.";
+
+        $categoryMap   = [];
+        $categoryResult = $connection->query("SELECT `id`, `remark` FROM `category`");
+        if (!$categoryResult) {
+            throw new Exception('بارگذاری دسته‌بندی‌ها با خطا مواجه شد: ' . $connection->error);
+        }
+        while ($row = $categoryResult->fetch_assoc()) {
+            $id     = trim((string) ($row['id'] ?? ''));
+            $remark = $row['remark'] ?? '';
+            if ($id === '') {
+                continue;
+            }
+            $categoryMap[$id] = $remark;
+        }
+        $categoryResult->free();
+        if (empty($categoryMap)) {
+            throw new Exception('دسته‌بندی معتبری برای مهاجرت یافت نشد.');
+        }
+
+        $total = 0;
+        $countResult = $connection->query("SELECT COUNT(*) AS total FROM `product`");
+        if ($countResult) {
+            $total = (int) ($countResult->fetch_assoc()['total'] ?? 0);
+            $countResult->free();
+        }
+        $log[] = "📊 تعداد محصولات برای بروزرسانی: {$total}";
+        file_put_contents($debugFile, "Products total: {$total}\n", FILE_APPEND);
+
+        if ($total === 0) {
+            $connection->close();
+            return true;
+        }
+
+        $connection->autocommit(false);
+        $connection->begin_transaction();
+
+        $updateStmt = $connection->prepare(
+            "UPDATE `product` SET `Category` = ? WHERE `Category` = ?"
+        );
+        if (!$updateStmt) {
+            throw new Exception('آماده‌سازی پرس‌وجو ناموفق بود: ' . $connection->error);
+        }
+
+        $processed = 0;
+        $failed    = 0;
+
+        foreach ($categoryMap as $categoryId => $remark) {
+            $updateStmt->bind_param('ss', $remark, $categoryId);
+
+            file_put_contents(
+                $debugFile,
+                "Try UPDATE for ID={$categoryId} , remark=" .
+                json_encode($remark, JSON_UNESCAPED_UNICODE) . "\n",
+                FILE_APPEND
+            );
+
+            if (!$updateStmt->execute()) {
+                $failed++;
+                $msg = "⚠️ خطا در بروزرسانی {$categoryId}: " . $updateStmt->error;
+                $log[] = $msg;
+                file_put_contents($debugFile, $msg . "\n", FILE_APPEND);
+                continue;
+            }
+
+            $affected  = $updateStmt->affected_rows;
+            $processed += $affected;
+
+            if ($affected > 0) {
+                $msg = "✅ {$affected} رکورد برای {$remark} آپدیت شد.";
+                $log[] = $msg;
+                file_put_contents($debugFile, $msg . "\n", FILE_APPEND);
+            }
+        }
+
+        $connection->commit();
+        $updateStmt->close();
+        $connection->close();
+
+        $log[] = "✅ تراکنش ثبت شد (پردازش: {$processed}, خطاها: {$failed}).";
+        file_put_contents(
+            $debugFile,
+            "COMMIT OK (processed={$processed}, failed={$failed})\n",
+            FILE_APPEND
+        );
+
+        return true;
+    } catch (Exception $exception) {
+        $msg = "❌ خطای مهاجرت دسته‌بندی‌ها: " . $exception->getMessage();
+        $log[] = $msg;
+        file_put_contents($debugFile, $msg . "\n", FILE_APPEND);
+
+        if (isset($connection) && $connection instanceof mysqli && $connection->connect_errno === 0) {
+            $connection->rollback();
+            $connection->close();
+            file_put_contents($debugFile, "ROLLBACK\n", FILE_APPEND);
+        }
+        return false;
+    }
+}
+function ensureTableAndColumn(mysqli $mysqli, string $table, string $column): void {
+    $tableEscaped = $mysqli->real_escape_string($table);
+    $columnEscaped = $mysqli->real_escape_string($column);
+    $tableResult = $mysqli->query("SHOW TABLES LIKE '{$tableEscaped}'");
+    if (!$tableResult || $tableResult->num_rows === 0) {
+        throw new Exception("جدول {$table} پیدا نشد.");
+    }
+    $tableResult->free();
+    $columnResult = $mysqli->query("SHOW COLUMNS FROM `{$tableEscaped}` LIKE '{$columnEscaped}'");
+    if (!$columnResult || $columnResult->num_rows === 0) {
+        throw new Exception("ستون {$column} در جدول {$table} وجود ندارد.");
+    }
+    $columnResult->free();
 }
 ?>
 <!DOCTYPE html>
@@ -852,9 +1191,114 @@ try {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
+<style>
         * {
             font-family: Vazir, sans-serif;
+        }
+        .wizard-steps {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 30px 0;
+            gap: 20px;
+        }
+        .wizard-step {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .wizard-step-number {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 2px solid rgba(50, 184, 198, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        .wizard-step.active .wizard-step-number {
+            background: rgba(50, 184, 198, 0.3);
+            border-color: #32b8c6;
+            color: #32b8c6;
+            box-shadow: 0 0 20px rgba(50, 184, 198, 0.4);
+        }
+        .wizard-step.completed .wizard-step-number {
+            background: rgba(40, 167, 69, 0.3);
+            border-color: #28a745;
+            color: #28a745;
+        }
+        .wizard-step-label {
+            color: #666;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        .wizard-step.active .wizard-step-label {
+            color: #32b8c6;
+            font-weight: 600;
+        }
+        .wizard-arrow {
+            color: rgba(50, 184, 198, 0.3);
+            font-size: 20px;
+        }
+        .wizard-content {
+            min-height: 300px;
+        }
+        .step-section {
+            display: none;
+        }
+        .step-section.active {
+            display: block;
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .wizard-navigation {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 30px;
+        }
+        .wizard-btn {
+            padding: 14px 32px;
+            border-radius: 8px;
+            border: 2px solid;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            font-family: Vazir, sans-serif;
+        }
+        .wizard-btn-next {
+            background: rgba(50, 184, 198, 0.2);
+            border-color: #32b8c6;
+            color: #32b8c6;
+        }
+        .wizard-btn-next:hover {
+            background: rgba(50, 184, 198, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(50, 184, 198, 0.3);
+        }
+        .wizard-btn-prev {
+            background: rgba(108, 117, 125, 0.2);
+            border-color: #6c757d;
+            color: #aaa;
+        }
+        .wizard-btn-prev:hover {
+            background: rgba(108, 117, 125, 0.3);
+            transform: translateY(-2px);
+        }
+        .wizard-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
         .server-type-selector {
             display: grid;
@@ -1015,6 +1459,37 @@ try {
         .migration-section.active {
             display: block;
         }
+        .install-field-step {
+            display: none;
+        }
+        .install-field-step.active {
+            display: block;
+            animation: fadeIn 0.3s ease-in;
+        }
+        .install-field-progress {
+            text-align: center;
+            color: #aaa;
+            font-size: 14px;
+            margin-top: 15px;
+        }
+        .install-field-navigation {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        #install-submit {
+            margin-top: 25px;
+        }
+        @media (max-width: 768px) {
+            .wizard-steps {
+                flex-direction: column;
+                gap: 10px;
+            }
+            .wizard-arrow {
+                transform: rotate(90deg);
+            }
+        }
     </style>
 </head>
 <body>
@@ -1048,98 +1523,177 @@ try {
             </script>
         <?php endif; ?>
         <form id="installer-form" <?php if($success) { echo 'style="display:none;"'; } ?> method="post" enctype="multipart/form-data">
-            <div class="server-type-selector">
-                <div class="server-type-card active" data-server-type="cpanel">
-                    <input type="radio" name="server_type" value="cpanel" id="cpanel" checked>
-                    <h3><i class="fas fa-server"></i> هاست cPanel</h3>
-                    <p>نصب روی هاست cPanel</p>
+            <div class="wizard-steps">
+                <div class="wizard-step <?php echo ($currentStep === 1) ? 'active' : (($currentStep > 1) ? 'completed' : ''); ?>" data-step="1">
+                    <div class="wizard-step-number">1</div>
+                    <div class="wizard-step-label">انتخاب نوع سرور</div>
                 </div>
-                <div class="server-type-card" data-server-type="server">
-                    <input type="radio" name="server_type" value="server" id="server">
-                    <h3><i class="fas fa-cloud"></i> سرور</h3>
-                    <p>نصب روی سرور (مسیر: /var/www/html/mirzabotconfig)</p>
+                <div class="wizard-arrow"><i class="fas fa-arrow-left"></i></div>
+                <div class="wizard-step <?php echo ($currentStep === 2) ? 'active' : (($currentStep > 2) ? 'completed' : ''); ?>" data-step="2">
+                    <div class="wizard-step-number">2</div>
+                    <div class="wizard-step-label">نوع نصب</div>
                 </div>
-            </div>
-            <div class="install-type-selector" id="install-type-selector">
-                <div class="install-type-card active" data-install-type="simple">
-                    <input type="radio" name="install_type" value="simple" id="simple" checked>
-                    <h3><i class="fas fa-download"></i> نصب ساده</h3>
-                    <p>نصب جدید بدون داده قبلی</p>
-                </div>
-                <div class="install-type-card" data-install-type="migrate_free_to_pro">
-                    <input type="radio" name="install_type" value="migrate_free_to_pro" id="migrate_free_to_pro">
-                    <h3><i class="fas fa-arrow-up"></i> مهاجرت رایگان به پرو</h3>
-                    <p>انتقال از نسخه رایگان به پرو</p>
+                <div class="wizard-arrow"><i class="fas fa-arrow-left"></i></div>
+                <div class="wizard-step <?php echo ($currentStep === 3) ? 'active' : ''; ?>" data-step="3">
+                    <div class="wizard-step-number">3</div>
+                    <div class="wizard-step-label">اطلاعات نصب</div>
                 </div>
             </div>
-            <div id="db-backup-question" style="display: none;">
-                <h3>
-                    <i class="fas fa-question-circle"></i>
-                    آیا دیتابیس بکاپ از قبل وارد شده است
-                </h3>
-                <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-top: 20px;">
-                    <button type="button" class="backup-btn" data-value="yes">
-                        <i class="fas fa-check"></i> بله، از قبل وارد کرده‌ام
-                    </button>
-                    <button type="button" class="backup-btn active" data-value="no">
-                        <i class="fas fa-upload"></i> خیر، نیاز به آپلود دارم
-                    </button>
+            <div class="wizard-content">
+                <div class="step-section <?php echo ($currentStep === 1) ? 'active' : ''; ?>" id="step-1">
+                    <h2 style="text-align: center; color: #32b8c6; margin-bottom: 20px;">
+                        <i class="fas fa-server"></i> انتخاب نوع سرور
+                    </h2>
+                    <div class="server-type-selector">
+                        <div class="server-type-card <?php echo ($serverType === 'cpanel') ? 'active' : ''; ?>" data-server-type="cpanel">
+                            <input type="radio" name="server_type" value="cpanel" id="cpanel" <?php echo ($serverType === 'cpanel') ? 'checked' : ''; ?>>
+                            <h3><i class="fas fa-server"></i> هاست cPanel</h3>
+                            <p>نصب روی هاست cPanel</p>
+                        </div>
+                        <div class="server-type-card <?php echo ($serverType === 'server') ? 'active' : ''; ?>" data-server-type="server">
+                            <input type="radio" name="server_type" value="server" id="server" <?php echo ($serverType === 'server') ? 'checked' : ''; ?>>
+                            <h3><i class="fas fa-cloud"></i> سرور</h3>
+                            <p>نصب روی سرور (مسیر: /var/www/html/mirzabotconfig)</p>
+                        </div>
+                    </div>
                 </div>
-                <input type="hidden" name="has_db_backup" id="has_db_backup" value="no">
-            </div>
-            <div class="migration-section" id="migration-section">
-                <h3><i class="fas fa-file-archive"></i> آپلود فایل بکاپ</h3>
-                <div class="file-upload">
-                    <label for="backup_file"><i class="fas fa-folder-open"></i> فایل بکاپ دیتابیس (SQL یا ZIP):</label>
-                    <input type="file" name="backup_file" id="backup_file">
-                    <small style="display: block; margin-top: 5px; color: #666;">
-                        ⚠️ فرمت‌های پشتیبانی شده: .sql یا .zip (شامل فایل SQL). در اندروید، اگر .sql انتخاب نشد، فایل SQL را زیپ کنید و آپلود نمایید.
-                    </small>
+                <div class="step-section <?php echo ($currentStep === 2) ? 'active' : ''; ?>" id="step-2">
+                    <h2 style="text-align: center; color: #32b8c6; margin-bottom: 20px;">
+                        <i class="fas fa-cogs"></i> نوع نصب
+                    </h2>
+                    <div class="install-type-selector" id="install-type-selector">
+                        <div class="install-type-card <?php echo ($installType === 'simple') ? 'active' : ''; ?>" data-install-type="simple">
+                            <input type="radio" name="install_type" value="simple" id="simple" <?php echo ($installType === 'simple') ? 'checked' : ''; ?>>
+                            <h3><i class="fas fa-download"></i> نصب ساده</h3>
+                            <p>نصب جدید بدون داده قبلی</p>
+                        </div>
+                        <div class="install-type-card <?php echo ($installType === 'migrate_free_to_pro') ? 'active' : ''; ?>" data-install-type="migrate_free_to_pro">
+                            <input type="radio" name="install_type" value="migrate_free_to_pro" id="migrate_free_to_pro" <?php echo ($installType === 'migrate_free_to_pro') ? 'checked' : ''; ?>>
+                            <h3><i class="fas fa-arrow-up"></i> مهاجرت رایگان به پرو</h3>
+                            <p>انتقال از نسخه رایگان به پرو</p>
+                        </div>
+                    </div>
+                    <div id="db-backup-question" style="<?php echo ($installType === 'migrate_free_to_pro') ? 'display:block;' : 'display:none;'; ?>">
+                        <h3>
+                            <i class="fas fa-question-circle"></i>
+                            آیا دیتابیس بکاپ از قبل وارد شده است
+                        </h3>
+                        <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-top: 20px;">
+                            <button type="button" class="backup-btn <?php echo ($hasDbBackup === 'yes') ? 'active' : ''; ?>" data-value="yes">
+                                <i class="fas fa-check"></i> بله، از قبل وارد کرده‌ام
+                            </button>
+                            <button type="button" class="backup-btn <?php echo ($hasDbBackup === 'no') ? 'active' : ''; ?>" data-value="no">
+                                <i class="fas fa-upload"></i> خیر، نیاز به آپلود دارم
+                            </button>
+                        </div>
+                        <input type="hidden" name="has_db_backup" id="has_db_backup" value="<?php echo escapeHtml($hasDbBackup); ?>">
+                    </div>
+                    <?php $migrationActive = needsBackupUpload($installType, $hasDbBackup); ?>
+                    <div class="migration-section <?php echo $migrationActive ? 'active' : ''; ?>" id="migration-section" style="<?php echo $migrationActive ? 'display:block;' : 'display:none;'; ?>">
+                        <h3><i class="fas fa-file-archive"></i> آپلود فایل بکاپ</h3>
+                        <div class="file-upload">
+                            <label for="backup_file"><i class="fas fa-folder-open"></i> فایل بکاپ دیتابیس (SQL یا ZIP):</label>
+                            <input type="file" name="backup_file" id="backup_file">
+                            <small style="display: block; margin-top: 5px; color: #666;">
+                                ⚠️ فرمت‌های پشتیبانی شده: .sql یا .zip (شامل فایل SQL). در اندروید، اگر .sql انتخاب نشد، فایل SQL را زیپ کنید و آپلود نمایید.
+                            </small>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-section <?php echo ($currentStep === 3) ? 'active' : ''; ?>" id="step-3">
+                    <h2 style="text-align: center; color: #32b8c6; margin-bottom: 20px;">
+                        <i class="fas fa-database"></i> اطلاعات نصب
+                    </h2>
+                    <div class="install-field-step <?php echo ($currentInstallField === 1) ? 'active' : ''; ?>" data-field-step="1">
+                        <div class="form-group">
+                            <label for="admin_id"><i class="fas fa-user"></i> آیدی عددی ادمین:</label>
+                            <input type="text" id="admin_id" name="admin_id"
+                                   placeholder="ADMIN TELEGRAM #Id" value="<?php echo escapeHtml($uPOST['admin_id'] ?? ''); ?>" required>
+                        </div>
+                    </div>
+                    <div class="install-field-step <?php echo ($currentInstallField === 2) ? 'active' : ''; ?>" data-field-step="2">
+                        <div class="form-group">
+                            <label for="tg_bot_token"><i class="fas fa-key"></i> توکن ربات تلگرام:</label>
+                            <input type="text" id="tg_bot_token" name="tg_bot_token"
+                                   placeholder="BOT TOKEN" value="<?php echo escapeHtml($uPOST['tg_bot_token'] ?? ''); ?>" required>
+                        </div>
+                    </div>
+                    <div class="install-field-step <?php echo ($currentInstallField === 3) ? 'active' : ''; ?>" data-field-step="3">
+                        <div class="form-group">
+                            <label for="database_username"><i class="fas fa-user"></i> نام کاربری دیتابیس:</label>
+                            <input type="text" id="database_username" name="database_username"
+                                   placeholder="DATABASE USERNAME" value="<?php echo escapeHtml($uPOST['database_username'] ?? ''); ?>" required>
+                        </div>
+                    </div>
+                    <div class="install-field-step <?php echo ($currentInstallField === 4) ? 'active' : ''; ?>" data-field-step="4">
+                        <div class="form-group">
+                            <label for="database_password"><i class="fas fa-lock"></i> رمز عبور دیتابیس:</label>
+                            <input type="text" id="database_password" name="database_password"
+                                   placeholder="DATABASE PASSWORD" value="<?php echo escapeHtml($uPOST['database_password'] ?? ''); ?>" required>
+                        </div>
+                    </div>
+                    <div class="install-field-step <?php echo ($currentInstallField === 5) ? 'active' : ''; ?>" data-field-step="5">
+                        <div class="form-group">
+                            <label for="database_name"><i class="fas fa-database"></i> نام دیتابیس:</label>
+                            <input type="text" id="database_name" name="database_name"
+                                   placeholder="DATABASE NAME" value="<?php echo escapeHtml($uPOST['database_name'] ?? ''); ?>" required>
+                        </div>
+                    </div>
+                    <div class="install-field-step <?php echo ($currentInstallField === 6) ? 'active' : ''; ?>" data-field-step="6">
+                        <div class="form-group">
+                            <details>
+                                <summary for="secret_key"><i class="fas fa-globe"></i> آدرس سورس ربات</summary>
+                                <label for="bot_address_webhook">آدرس صفحه سورس ربات (نه installer! مثال: https:
+                                <input type="text" id="bot_address_webhook" name="bot_address_webhook"
+                                       placeholder="https://yourdomain.com/mirzabotconfig/index.php"
+                                       value="<?php echo escapeHtml($uPOST['bot_address_webhook'] ?? ($webAddress.'/index.php')); ?>" required>
+                            </details>
+                        </div>
+                    </div>
+                    <div class="install-field-step <?php echo ($currentInstallField === 7) ? 'active' : ''; ?>" data-field-step="7">
+                        <div class="form-group">
+                            <label for="remove_directory"><i class="fas fa-exclamation-triangle" style="color:#f30;"></i> <b style="color:#f30;">هشدار:</b> حذف خودکار اسکریپت نصب‌کننده پس از نصب موفقیت‌آمیز</label>
+                            <label for="remove_directory" style="font-size: 14px;font-weight: normal;text-indent: 20px;">برای امنیت بیشتر، بعد از اتمام نصب ربات پوشه Installer حذف خواهد شد. </label>
+                        </div>
+                    </div>
+                    <div class="install-field-progress">
+                        <span>فیلد <span id="install-progress"><?php echo $currentInstallField . ' / ' . $installFieldTotal; ?></span></span>
+                    </div>
+                    <div class="install-field-navigation">
+                        <button type="button" class="wizard-btn wizard-btn-prev" id="install-prev-btn" style="<?php echo ($currentInstallField <= 1) ? 'display:none;' : ''; ?>">
+                            <i class="fas fa-arrow-right"></i> فیلد قبل
+                        </button>
+                        <button type="button" class="wizard-btn wizard-btn-next" id="install-next-btn" style="<?php echo ($currentInstallField >= $installFieldTotal) ? 'display:none;' : ''; ?>">
+                            فیلد بعد <i class="fas fa-arrow-left"></i>
+                        </button>
+                    </div>
+                    <div class="install-submit" id="install-submit" style="<?php echo ($currentInstallField >= $installFieldTotal) ? 'display:block;' : 'display:none;'; ?>">
+                        <button type="submit" name="submit" value="submit"><i class="fas fa-rocket"></i> نصب ربات</button>
+                    </div>
                 </div>
             </div>
-            <div class="form-group">
-                <label for="admin_id"><i class="fas fa-user"></i> آیدی عددی ادمین:</label>
-                <input type="text" id="admin_id" name="admin_id"
-                       placeholder="ADMIN TELEGRAM #Id" value="<?php echo escapeHtml($uPOST['admin_id'] ?? ''); ?>" required>
+            <div class="wizard-navigation">
+                <button type="button" class="wizard-btn wizard-btn-prev" id="prev-btn" style="<?php echo ($currentStep <= 1) ? 'display:none;' : ''; ?>">
+                    <i class="fas fa-arrow-right"></i> مرحله قبل
+                </button>
+                <button type="button" class="wizard-btn wizard-btn-next" id="next-btn" style="<?php echo ($currentStep >= 3) ? 'display:none;' : ''; ?>">
+                    مرحله بعد <i class="fas fa-arrow-left"></i>
+                </button>
             </div>
-            <div class="form-group">
-                <label for="tg_bot_token"><i class="fas fa-key"></i> توکن ربات تلگرام:</label>
-                <input type="text" id="tg_bot_token" name="tg_bot_token"
-                       placeholder="BOT TOKEN" value="<?php echo escapeHtml($uPOST['tg_bot_token'] ?? ''); ?>" required>
-            </div>
-            <div class="form-group">
-                <label for="database_username"><i class="fas fa-user"></i> نام کاربری دیتابیس:</label>
-                <input type="text" id="database_username" name="database_username"
-                       placeholder="DATABASE USERNAME" value="<?php echo escapeHtml($uPOST['database_username'] ?? ''); ?>" required>
-            </div>
-            <div class="form-group">
-                <label for="database_password"><i class="fas fa-lock"></i> رمز عبور دیتابیس:</label>
-                <input type="text" id="database_password" name="database_password"
-                       placeholder="DATABASE PASSWORD" value="<?php echo escapeHtml($uPOST['database_password'] ?? ''); ?>" required>
-            </div>
-            <div class="form-group">
-                <label for="database_name"><i class="fas fa-database"></i> نام دیتابیس:</label>
-                <input type="text" id="database_name" name="database_name"
-                       placeholder="DATABASE NAME" value="<?php echo escapeHtml($uPOST['database_name'] ?? ''); ?>" required>
-            </div>
-            <div class="form-group">
-                <details>
-                    <summary for="secret_key"><i class="fas fa-globe"></i> آدرس سورس ربات</summary>
-                    <label for="bot_address_webhook">آدرس صفحه سورس ربات (نه installer! مثال: https:
-                    <input type="text" id="bot_address_webhook" name="bot_address_webhook" placeholder="https://yourdomain.com/mirzabotconfig/index.php" value="<?php echo escapeHtml($uPOST['bot_address_webhook'] ?? ($webAddress.'/index.php')); ?>" required>
-                </details>
-            </div>
-            <div class="form-group">
-                <label for="remove_directory"><i class="fas fa-exclamation-triangle" style="color:#f30;"></i> <b style="color:#f30;">هشدار:</b> حذف خودکار اسکریپت نصب&zwnj;کننده پس از نصب موفقیت&zwnj;آمیز</label>
-                <label for="remove_directory" style="font-size: 14px;font-weight: normal;text-indent: 20px;">برای امنیت بیشتر، بعد از اتمام نصب ربات پوشه Installer حذف خواهد شد. </label>
-            </div>
-            <button type="submit" name="submit" value="submit"><i class="fas fa-rocket"></i> نصب ربات</button>
+            <input type="hidden" name="current_step" id="current_step" value="<?php echo $currentStep; ?>">
+            <input type="hidden" name="current_install_field" id="current_install_field" value="<?php echo $currentInstallField; ?>">
         </form>
         <footer>
             <p>MirzabotPro Installer , Made by ♥️ | <a href="https://github.com/Mmd-Amir/mirza_pro/releases/">Github</a> | <a href="https://t.me/+TDJJIwuYUsozMzI0">Telegram</a> | &copy; <?php echo date('Y'); ?></p>
         </footer>
     </div>
-    <script>
+        <script>
+        let currentStep = <?php echo (int)$currentStep; ?>;
+        const totalWizardSteps = 3;
+        let currentInstallField = <?php echo (int)$currentInstallField; ?>;
+        let installFieldSteps = [];
+        let totalInstallFields = <?php echo $installFieldTotal; ?>;
+
         function selectServerType(type) {
             var serverInputs = document.querySelectorAll('input[name="server_type"]');
             serverInputs.forEach(function(input) {
@@ -1150,6 +1704,7 @@ try {
             });
             updateInstallTypes();
         }
+
         function selectInstallType(type, skipToggle) {
             var installInputs = document.querySelectorAll('input[name="install_type"]');
             installInputs.forEach(function(input) {
@@ -1158,54 +1713,37 @@ try {
             document.querySelectorAll('.install-type-card').forEach(function(card) {
                 card.classList.toggle('active', card.dataset.installType === type);
             });
-            var requiresMigration = (type === 'migrate_free_to_pro');
-            var dbQuestion = document.getElementById('db-backup-question');
-            var migrationSection = document.getElementById('migration-section');
-            if (dbQuestion) {
-                dbQuestion.style.display = requiresMigration ? 'block' : 'none';
-            }
-            if (requiresMigration) {
+            if (type === 'migrate_free_to_pro') {
                 var hasBackupInput = document.getElementById('has_db_backup');
                 var currentValue = hasBackupInput ? hasBackupInput.value : 'no';
                 handleBackupChoice(currentValue, true);
             }
-            if (!requiresMigration && migrationSection) {
-                migrationSection.classList.remove('active');
-                migrationSection.style.display = 'none';
-            }
             if (!skipToggle) {
+                toggleBackupUpload();
+            } else if (type === 'migrate_free_to_pro') {
                 toggleBackupUpload();
             }
         }
+
         function updateInstallTypes() {
             var serverInput = document.querySelector('input[name="server_type"]:checked');
             var serverType = serverInput ? serverInput.value : 'cpanel';
             var simpleCard = document.querySelector('.install-type-card[data-install-type="simple"]');
             var migrateCard = document.querySelector('.install-type-card[data-install-type="migrate_free_to_pro"]');
-            var hasBackupInput = document.getElementById('has_db_backup');
             if (serverType === 'server') {
                 if (simpleCard) simpleCard.style.display = 'none';
                 if (migrateCard) migrateCard.style.display = 'block';
-                if (hasBackupInput) hasBackupInput.value = 'no';
-                handleBackupChoice('no', true);
-                selectInstallType('migrate_free_to_pro', true);
-                toggleBackupUpload();
+                var selected = document.querySelector('input[name="install_type"]:checked');
+                if (!selected || selected.value !== 'migrate_free_to_pro') {
+                    selectInstallType('migrate_free_to_pro', true);
+                }
             } else {
                 if (simpleCard) simpleCard.style.display = 'block';
                 if (migrateCard) migrateCard.style.display = 'block';
-                selectInstallType('simple', true);
-                var migrationSection = document.getElementById('migration-section');
-                if (migrationSection) {
-                    migrationSection.classList.remove('active');
-                    migrationSection.style.display = 'none';
-                }
-                if (hasBackupInput) hasBackupInput.value = 'no';
-                document.querySelectorAll('.backup-btn').forEach(function(btn) {
-                    btn.classList.remove('active');
-                });
-                toggleBackupUpload();
             }
+            toggleBackupUpload();
         }
+
         function handleBackupChoice(value, skipToggle) {
             var hasBackupInput = document.getElementById('has_db_backup');
             if (hasBackupInput) {
@@ -1218,25 +1756,146 @@ try {
                 toggleBackupUpload();
             }
         }
+
         function toggleBackupUpload() {
-            var installType = document.querySelector('input[name="install_type"]:checked');
+            var installTypeInput = document.querySelector('input[name="install_type"]:checked');
             var hasBackupInput = document.getElementById('has_db_backup');
-            var hasBackup = hasBackupInput ? hasBackupInput.value : 'no';
+            var dbQuestion = document.getElementById('db-backup-question');
             var migrationSection = document.getElementById('migration-section');
-            if (!installType) return;
-            var isMigration = (installType.value === 'migrate_free_to_pro');
-            var needsUpload = (hasBackup === 'no');
-            if (isMigration && needsUpload) {
-                if (migrationSection) {
-                    migrationSection.classList.add('active');
-                    migrationSection.style.display = 'block';
-                }
-            } else if (migrationSection) {
-                migrationSection.classList.remove('active');
-                migrationSection.style.display = 'none';
+            var isMigration = installTypeInput && installTypeInput.value === 'migrate_free_to_pro';
+            var hasBackup = hasBackupInput ? hasBackupInput.value : 'no';
+            if (dbQuestion) {
+                dbQuestion.style.display = isMigration ? 'block' : 'none';
+            }
+            if (migrationSection) {
+                var needsUpload = isMigration && hasBackup === 'no';
+                migrationSection.style.display = needsUpload ? 'block' : 'none';
+                migrationSection.classList.toggle('active', needsUpload);
             }
         }
+
+        function changeInstallField(delta) {
+            if (!installFieldSteps.length) {
+                return;
+            }
+            if (delta > 0 && !validateInstallField(currentInstallField)) {
+                return;
+            }
+            var next = currentInstallField + delta;
+            if (next < 1 || next > totalInstallFields) {
+                return;
+            }
+            currentInstallField = next;
+            updateInstallFieldSteps();
+        }
+
+        function validateInstallField(stepIndex) {
+            var step = installFieldSteps[stepIndex - 1];
+            if (!step) {
+                return true;
+            }
+            var inputs = step.querySelectorAll('input[required], select[required], textarea[required]');
+            for (var i = 0; i < inputs.length; i++) {
+                var input = inputs[i];
+                var needsValue = (input.type === 'text' || input.type === 'password' || input.type === 'tel' || input.type === 'email' || input.type === 'url' || input.type === 'search' || input.type === 'number');
+                if (needsValue && input.value.trim() === '') {
+                    input.reportValidity();
+                    return false;
+                }
+                if ((input.tagName === 'SELECT' || input.tagName === 'TEXTAREA') && input.value.trim() === '') {
+                    input.reportValidity();
+                    return false;
+                }
+                if (input.type === 'file' && !input.files.length) {
+                    input.reportValidity();
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function updateInstallFieldSteps() {
+            if (!installFieldSteps.length) {
+                return;
+            }
+            if (currentInstallField < 1) {
+                currentInstallField = 1;
+            }
+            if (currentInstallField > totalInstallFields) {
+                currentInstallField = totalInstallFields;
+            }
+            installFieldSteps.forEach(function(step, index) {
+                step.classList.toggle('active', index === currentInstallField - 1);
+            });
+            var prevBtn = document.getElementById('install-prev-btn');
+            var nextBtn = document.getElementById('install-next-btn');
+            var submitBlock = document.getElementById('install-submit');
+            var progress = document.getElementById('install-progress');
+            var hiddenField = document.getElementById('current_install_field');
+            if (prevBtn) {
+                prevBtn.style.display = currentInstallField === 1 ? 'none' : 'inline-flex';
+            }
+            if (nextBtn) {
+                nextBtn.style.display = currentInstallField === totalInstallFields ? 'none' : 'inline-flex';
+            }
+            if (submitBlock) {
+                submitBlock.style.display = currentInstallField === totalInstallFields ? 'block' : 'none';
+            }
+            if (progress) {
+                progress.textContent = currentInstallField + ' / ' + totalInstallFields;
+            }
+            if (hiddenField) {
+                hiddenField.value = currentInstallField;
+            }
+        }
+
+        function updateWizardDisplay() {
+            if (currentStep < 1) {
+                currentStep = 1;
+            }
+            if (currentStep > totalWizardSteps) {
+                currentStep = totalWizardSteps;
+            }
+            document.querySelectorAll('.wizard-step').forEach(function(step) {
+                var stepNum = parseInt(step.dataset.step, 10);
+                step.classList.remove('active');
+                step.classList.remove('completed');
+                if (stepNum === currentStep) {
+                    step.classList.add('active');
+                } else if (stepNum < currentStep) {
+                    step.classList.add('completed');
+                }
+            });
+            document.querySelectorAll('.step-section').forEach(function(section) {
+                section.classList.toggle('active', section.id === 'step-' + currentStep);
+            });
+            if (currentStep === totalWizardSteps) {
+                updateInstallFieldSteps();
+            }
+            var prevBtn = document.getElementById('prev-btn');
+            var nextBtn = document.getElementById('next-btn');
+            if (prevBtn) {
+                prevBtn.style.display = currentStep === 1 ? 'none' : 'inline-flex';
+            }
+            if (nextBtn) {
+                nextBtn.style.display = currentStep === totalWizardSteps ? 'none' : 'inline-flex';
+            }
+            var hiddenStep = document.getElementById('current_step');
+            if (hiddenStep) {
+                hiddenStep.value = currentStep;
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
+            installFieldSteps = Array.from(document.querySelectorAll('.install-field-step'));
+            if (installFieldSteps.length) {
+                totalInstallFields = installFieldSteps.length;
+            }
+            updateInstallFieldSteps();
+            updateWizardDisplay();
+            updateInstallTypes();
+
             document.querySelectorAll('.server-type-card').forEach(function(card) {
                 card.addEventListener('click', function() {
                     selectServerType(card.dataset.serverType);
@@ -1252,7 +1911,59 @@ try {
                     handleBackupChoice(btn.dataset.value);
                 });
             });
-            updateInstallTypes();
+
+            var installNextBtn = document.getElementById('install-next-btn');
+            var installPrevBtn = document.getElementById('install-prev-btn');
+            if (installNextBtn) {
+                installNextBtn.addEventListener('click', function() {
+                    changeInstallField(1);
+                });
+            }
+            if (installPrevBtn) {
+                installPrevBtn.addEventListener('click', function() {
+                    changeInstallField(-1);
+                });
+            }
+
+            var nextBtn = document.getElementById('next-btn');
+            var prevBtn = document.getElementById('prev-btn');
+            if (nextBtn) {
+                nextBtn.addEventListener('click', function() {
+                    if (currentStep < totalWizardSteps) {
+                        currentStep++;
+                        updateWizardDisplay();
+                    }
+                });
+            }
+            if (prevBtn) {
+                prevBtn.addEventListener('click', function() {
+                    if (currentStep > 1) {
+                        currentStep--;
+                        updateWizardDisplay();
+                    }
+                });
+            }
+
+            var hasBackupInput = document.getElementById('has_db_backup');
+            if (hasBackupInput) {
+                handleBackupChoice(hasBackupInput.value || 'no', true);
+            }
+            toggleBackupUpload();
+
+            var installerForm = document.getElementById('installer-form');
+            if (installerForm) {
+                installerForm.addEventListener('submit', function() {
+                    var stepField = document.getElementById('current_step');
+                    var fieldField = document.getElementById('current_install_field');
+                    if (stepField) {
+                        stepField.value = currentStep;
+                    }
+                    if (fieldField) {
+                        fieldField.value = currentInstallField;
+                    }
+                });
+            }
+
         });
     </script>
 </body>
@@ -1390,3 +2101,4 @@ function formatConfigValue($value, $quoteChar = '\'') {
     return $quoteChar . $escapedValue . $quoteChar;
 }
 ?>
+
