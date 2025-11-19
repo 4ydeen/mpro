@@ -40,9 +40,9 @@ https://domin.ir/botmirzapanel/installer
 ---
 
 
-
-
 ### ** آموزش نصب aapanel ** 
+
+
 <details>
   <summary> مقدمات </summary>
 
