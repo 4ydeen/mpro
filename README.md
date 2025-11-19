@@ -38,7 +38,6 @@ https://domin.ir/botmirzapanel/installer
 
 
 
-<details>
 
 ---
 ### **آموزش نصب aapanel **  
