@@ -37,3 +37,17 @@ https://domin.ir/botmirzapanel/installer
 
 
 
+
+<details>
+
+---
+### **آموزش نصب aapanel **  
+
+<details>
+  <summary> مقدمات </summary>
+
+  #### 1️⃣ ضروری است که وب‌سرور شما بر روی aaPanel با نسخه OpenLiteSpeed 1.8.4 اجرا شود.
+
+  #### 2️⃣ سایر مراحل را مطابق با راهنمای «آموزش نصب روی هاست» ادامه دهید.
+
+</details>
