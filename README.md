@@ -40,7 +40,7 @@ https://domin.ir/botmirzapanel/installer
 ---
 
 
-### ** آموزش نصب  **
+### **آموزش نصب aapanel**
 
 
 <details>
