@@ -93,3 +93,16 @@ bash -c "$(curl -L https://raw.githubusercontent.com/Mmd-Amir/mirza_pro/main/ins
   
 </details>
 
+
+### **اطلاعات کلی**
+
+
+<details>
+  <summary> توضیحات </summary>
+
+
+| php | cronjob | 
+|--------|------|
+| 8.3 / 8.4  | Mandatory | 
+  
+</details>
