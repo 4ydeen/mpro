@@ -87,44 +87,76 @@ function splitSQLQueries($sql) {
     $inString = false;
     $stringChar = '';
     $length = strlen($sql);
-    for($i = 0; $i < $length; $i++) {
+
+    for ($i = 0; $i < $length; $i++) {
         $char = $sql[$i];
-        if(($char == "'" || $char == '"') && ($i == 0 || $sql[$i-1] != '\\')) {
-            if(!$inString) {
-                $inString = true;
-                $stringChar = $char;
-            } elseif($char == $stringChar) {
-                $inString = false;
+
+        if ($char === "'" || $char === '"') {
+
+            $backslashCount = 0;
+            for ($j = $i - 1; $j >= 0 && $sql[$j] === '\\'; $j--) {
+                $backslashCount++;
+            }
+            $escaped = ($backslashCount % 2) === 1; 
+
+            if (!$escaped) {
+                if (!$inString) {
+                    $inString = true;
+                    $stringChar = $char;
+                } elseif ($char === $stringChar) {
+                    $inString = false;
+                }
             }
         }
+
         if (!$inString) {
-            if ($char == '-' && $i+1 < $length && $sql[$i+1] == '-') {
-                while ($i < $length && $sql[$i] != "\n") {
+
+            if ($char === '-' && $i + 1 < $length && $sql[$i+1] === '-') {
+                while ($i < $length && $sql[$i] !== "\n") {
                     $i++;
                 }
                 continue;
-            } elseif ($char == '#') {
-                while ($i < $length && $sql[$i] != "\n") {
+            }
+
+            if ($char === '#') {
+                while ($i < $length && $sql[$i] !== "\n") {
+                    $i++;
+                }
+                continue;
+            }
+
+            if ($char === '/' && $i + 1 < $length && $sql[$i+1] === '*') {
+                $i += 2;
+                while ($i < $length && !($sql[$i] === '*' && $i + 1 < $length && $sql[$i+1] === '/')) {
+                    $i++;
+                }
+
+                if ($i < $length) {
                     $i++;
                 }
                 continue;
             }
         }
+
         $currentQuery .= $char;
-        if($char == ';' && !$inString) {
+
+        if ($char === ';' && !$inString) {
             $trimmedQuery = trim($currentQuery);
-            if(!empty($trimmedQuery)) {
+            if (!empty($trimmedQuery) && $trimmedQuery !== ';') {
                 $queries[] = $trimmedQuery;
             }
             $currentQuery = '';
         }
     }
+
     $trimmedQuery = trim($currentQuery);
-    if(!empty($trimmedQuery) && $trimmedQuery != ';') {
+    if (!empty($trimmedQuery) && $trimmedQuery !== ';') {
         $queries[] = $trimmedQuery;
     }
+
     return $queries;
 }
+
 function dropExistingTables($mysqli, $dbName, $logHandle, &$ERROR = null) {
     $log = function($message) use ($logHandle) {
         if ($logHandle) {
@@ -2101,4 +2133,3 @@ function formatConfigValue($value, $quoteChar = '\'') {
     return $quoteChar . $escapedValue . $quoteChar;
 }
 ?>
-
