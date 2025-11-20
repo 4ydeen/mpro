@@ -95,7 +95,6 @@ bash -c "$(curl -L https://raw.githubusercontent.com/Mmd-Amir/mirza_pro/main/ins
 
 ```
 rm -r /var/www/html/mirzabotconfig/installer
-
 ```
 
 ### ⛔️حذف فایل Installer الزامی است.
