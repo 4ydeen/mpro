@@ -12,9 +12,12 @@
 👉 [حمایت از دولوپر میرزا NowPayments](https://nowpayments.io/donation/permiumbotmirza)
 
 
+
   
 
 </details>
+
+---
 
 #### **🌐 آموزش نصب هاست ( سیپنل اشتراکی )**  
 
