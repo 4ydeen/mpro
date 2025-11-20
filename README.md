@@ -78,6 +78,9 @@ bash -c "$(curl -L https://raw.githubusercontent.com/Mmd-Amir/mirza_pro/main/ins
 
 
 
+
+
+
 #### **↩️  آموزش نصب سرور ( در صورتی که قبلا نصب نشده )**
 
 
