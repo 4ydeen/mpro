@@ -113,7 +113,6 @@ bash -c "$(curl -L https://raw.githubusercontent.com/Mmd-Amir/mirza_pro/main/ins
 
 ---
 
----
 
 
 ### **اطلاعات کلی**
