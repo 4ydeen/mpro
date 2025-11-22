@@ -950,7 +950,7 @@ function tronratee(array $requiredKeys = [])
         return ['ok' => true, 'result' => $result];
     }
 
-    $usdToIrr = null;
+    $usdToToman = null;
 
     $usdResponse = @file_get_contents('https://sarfe.erfjab.com/api/prices', false, $context);
     if ($usdResponse === false) {
@@ -999,12 +999,12 @@ function tronratee(array $requiredKeys = [])
                 error_log('Missing USD price from Sarfe API.' . $rawLog);
             } else {
 
-                $usdToIrr = $usdPrice;
+                $usdToToman = $usdPrice;
             }
         }
     }
 
-    if ($usdToIrr === null) {
+    if ($usdToToman === null) {
         if ($needsTrx) {
             $missingKeys[] = 'TRX';
         }
@@ -1042,11 +1042,6 @@ function tronratee(array $requiredKeys = [])
         return $value; 
     };
 
-    $toToman = static function (float $rialValue) {
-
-        return round($rialValue / 10, 2);
-    };
-
     if ($needsTrx) {
 
         $trxUsd = $fetchCoinPrice('tron');
@@ -1054,8 +1049,7 @@ function tronratee(array $requiredKeys = [])
             error_log('Missing or invalid TRX price from CoinGecko');
             $missingKeys[] = 'TRX';
         } else {
-            $trxIrr       = $trxUsd * $usdToIrr;   
-            $result['TRX'] = $toToman($trxIrr);    
+            $result['TRX'] = round($trxUsd * $usdToToman, 2); 
         }
     }
 
@@ -1065,8 +1059,7 @@ function tronratee(array $requiredKeys = [])
             error_log('Missing or invalid Ton price from CoinGecko');
             $missingKeys[] = 'Ton';
         } else {
-            $tonIrr        = $tonUsd * $usdToIrr;
-            $result['Ton'] = $toToman($tonIrr);
+            $result['Ton'] = round($tonUsd * $usdToToman, 2); 
         }
     }
 
@@ -1077,8 +1070,7 @@ function tronratee(array $requiredKeys = [])
             error_log('Missing or invalid USDT price from CoinGecko');
             $missingKeys[] = 'USD';
         } else {
-            $usdtIrr       = $usdtUsd * $usdToIrr;
-            $result['USD'] = $toToman($usdtIrr);
+            $result['USD'] = round($usdtUsd * $usdToToman, 2); 
         }
     }
 
