@@ -4,10 +4,6 @@ if (!defined('APP_ROOT_PATH')) {
     define('APP_ROOT_PATH', __DIR__);
 }
 
-// Attempt to load the Composer autoloader when it is available. Some shared
-// hosting environments (such as cPanel) may not expose the vendor directory or
-// Composer installation, so we avoid a hard failure when the autoloader cannot
-// be located.
 $composerAutoload = APP_ROOT_PATH . '/vendor/autoload.php';
 if (is_readable($composerAutoload)) {
     require_once $composerAutoload;
@@ -129,15 +125,7 @@ function isShellExecAvailable()
 }
 
 if (!function_exists('safe_divide')) {
-    /**
-     * Safely divide two numeric values and return a fallback when division is not possible.
-     *
-     * @param mixed $numerator   The value to divide.
-     * @param mixed $denominator The value to divide by.
-     * @param mixed $fallback    The value returned when division cannot be performed.
-     *
-     * @return float|int
-     */
+
     function safe_divide($numerator, $denominator, $fallback = 0)
     {
         if (!is_numeric($numerator) || !is_numeric($denominator)) {
@@ -159,13 +147,6 @@ if (!function_exists('safe_divide')) {
     }
 }
 
-/**
- * Generate a referral code using the most secure random source that is available.
- *
- * @param int $length Desired length of the referral code.
- *
- * @return string
- */
 function generateReferralCode($length = 12)
 {
     $length = max(1, (int) $length);
@@ -207,15 +188,6 @@ function generateReferralCode($length = 12)
     return $code;
 }
 
-/**
- * Ensure that the specified user has a referral code stored in the database.
- *
- * @param mixed       $userId      User identifier.
- * @param string|null $currentCode Existing referral code.
- * @param int         $length      Length of the generated code when required.
- *
- * @return string|null The existing or newly generated code. Null is returned when the user id is invalid.
- */
 function ensureUserInvitationCode($userId, $currentCode = null, $length = 12)
 {
     if (!is_scalar($userId) || (string) $userId === '') {
@@ -234,15 +206,7 @@ function ensureUserInvitationCode($userId, $currentCode = null, $length = 12)
 }
 
 if (!function_exists('applyConnectionPlaceholders')) {
-    /**
-     * Populate legacy and modern connection placeholders within notification templates.
-     *
-     * @param string $template         The message template to update.
-     * @param string $subscriptionLink Subscription link (sublink).
-     * @param string $configList       List of configuration links.
-     *
-     * @return string Updated template.
-     */
+
     function applyConnectionPlaceholders($template, $subscriptionLink, $configList)
     {
         $trimmedSubscription = trim((string) $subscriptionLink);
@@ -955,6 +919,7 @@ function generateUUID()
 }
 function tronratee(array $requiredKeys = [])
 {
+
     $normalizedKeys = [];
     foreach ($requiredKeys as $key) {
         $normalized = strtoupper(trim((string) $key));
@@ -971,7 +936,6 @@ function tronratee(array $requiredKeys = [])
     $needsTrx = isset($normalizedKeys['TRX']);
     $needsTon = isset($normalizedKeys['TON']);
     $needsUsd = isset($normalizedKeys['USD']);
-    $shouldFetchTronApi = $needsTrx || $needsTon;
 
     $context = stream_context_create([
         'http' => [
@@ -982,232 +946,139 @@ function tronratee(array $requiredKeys = [])
     $result = [];
     $missingKeys = [];
 
-    if ($shouldFetchTronApi) {
-        $tronApiResponse = @file_get_contents('https://xxxxx.com', false, $context);
+    if (!$needsTrx && !$needsTon && !$needsUsd) {
+        return ['ok' => true, 'result' => $result];
+    }
 
-        if ($tronApiResponse === false) {
-            error_log('Failed to fetch currency rates from Tron rate API');
-            if ($needsTrx) {
-                $missingKeys[] = 'TRX';
-            }
-            if ($needsTon) {
-                $missingKeys[] = 'Ton';
-            }
+    $usdToIrr = null;
+
+    $usdResponse = @file_get_contents('https://sarfe.erfjab.com/api/prices', false, $context);
+    if ($usdResponse === false) {
+        error_log('Failed to fetch USD price from Sarfe API');
+    } else {
+        $usdData = json_decode($usdResponse, true);
+        if (!is_array($usdData)) {
+            error_log('Invalid response received from Sarfe API');
         } else {
-            $tronData = json_decode($tronApiResponse, true);
-            if (!is_array($tronData)) {
-                error_log('Invalid response received from Tron rate API');
-                if ($needsTrx) {
-                    $missingKeys[] = 'TRX';
+            $usdPrice = null;
+            $usdRawValues = [];
+
+            foreach (['usd1', 'usd2'] as $usdKey) {
+                if (!array_key_exists($usdKey, $usdData)) {
+                    continue;
                 }
-                if ($needsTon) {
-                    $missingKeys[] = 'Ton';
+
+                $rawValue = $usdData[$usdKey];
+                $usdRawValues[$usdKey] = $rawValue;
+
+                if (is_string($rawValue)) {
+
+                    $normalizedValue = preg_replace('/[^\d\.\-]/u', '', $rawValue);
+                } elseif (is_numeric($rawValue)) {
+                    $normalizedValue = (string) $rawValue;
+                } else {
+                    continue;
                 }
+
+                if (!is_numeric($normalizedValue)) {
+                    continue;
+                }
+
+                $numericValue = abs((float) $normalizedValue);
+                if ($numericValue > 0.0) {
+                    $usdPrice = $numericValue;
+                    break;
+                }
+            }
+
+            if ($usdPrice === null) {
+                $rawLog = '';
+                if (!empty($usdRawValues)) {
+                    $rawLog = ' Raw values: ' . json_encode($usdRawValues);
+                }
+                error_log('Missing USD price from Sarfe API.' . $rawLog);
             } else {
-                foreach (['data', 'result'] as $wrapperKey) {
-                    if (isset($tronData[$wrapperKey]) && is_array($tronData[$wrapperKey])) {
-                        $tronData = $tronData[$wrapperKey];
-                    }
-                }
 
-                $normalizeNumeric = static function ($value) {
-                    if (is_numeric($value)) {
-                        $numeric = (float) $value;
-                    } elseif (is_string($value)) {
-                        $filtered = preg_replace('/[^\d\.\-]/u', '', $value);
-                        if ($filtered === '' || !is_numeric($filtered)) {
-                            return null;
-                        }
-                        $numeric = (float) $filtered;
-                    } else {
-                        return null;
-                    }
-
-                    if (!is_finite($numeric)) {
-                        return null;
-                    }
-
-                    return $numeric;
-                };
-
-                $findNumericValueByKeys = static function (array $source, array $targetKeys) use ($normalizeNumeric) {
-                    $queue = [$source];
-
-                    $normalizedTargets = array_map(static function ($key) {
-                        return strtolower((string) $key);
-                    }, $targetKeys);
-
-                    while (!empty($queue)) {
-                        $current = array_shift($queue);
-                        foreach ($current as $currentKey => $value) {
-                            if (is_array($value)) {
-                                $queue[] = $value;
-                            }
-
-                            $keyString = strtolower((string) $currentKey);
-                            foreach ($normalizedTargets as $target) {
-                                if ($keyString === $target || str_contains($keyString, $target)) {
-                                    $candidate = $normalizeNumeric($value);
-                                    if ($candidate !== null && $candidate > 0.0) {
-                                        return $candidate;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    return null;
-                };
-
-                $extractRate = static function (?array $assetData, string $symbol) use ($findNumericValueByKeys) {
-                    if (!is_array($assetData) || empty($assetData)) {
-                        error_log('Missing or invalid rate for ' . $symbol . ' from Tron rate API');
-                        return null;
-                    }
-
-                    $rialValue = $findNumericValueByKeys($assetData, [
-                        'irr',
-                        'rial',
-                        'price_irr',
-                        'priceRial',
-                        'price_rial',
-                        'buy_irr',
-                        'sell_irr',
-                        'buyIrr',
-                        'sellIrr',
-                        'buy_rial',
-                        'sell_rial',
-                        'buyRial',
-                        'sellRial',
-                    ]);
-                    if ($rialValue !== null) {
-                        return $rialValue;
-                    }
-
-                    $tomanValue = $findNumericValueByKeys($assetData, [
-                        'irt',
-                        'toman',
-                        'price_irt',
-                        'priceToman',
-                        'price_toman',
-                        'buy_irt',
-                        'sell_irt',
-                        'buyIrt',
-                        'sellIrt',
-                        'buy_toman',
-                        'sell_toman',
-                        'buyToman',
-                        'sellToman',
-                    ]);
-                    if ($tomanValue !== null) {
-                        return $tomanValue * 10.0;
-                    }
-
-                    error_log('Missing or invalid rate for ' . $symbol . ' from Tron rate API');
-                    return null;
-                };
-
-                $resolveAssetData = static function (array $rates, array $candidates, string $symbol) {
-                    foreach ($candidates as $candidate) {
-                        if (isset($rates[$candidate]) && is_array($rates[$candidate])) {
-                            return $rates[$candidate];
-                        }
-                    }
-
-                    foreach ($rates as $value) {
-                        if (!is_array($value)) {
-                            continue;
-                        }
-
-                        $code = $value['symbol']
-                            ?? $value['code']
-                            ?? $value['title']
-                            ?? $value['currency']
-                            ?? $value['name']
-                            ?? $value['id']
-                            ?? null;
-                        if (is_string($code) && strcasecmp(trim($code), $symbol) === 0) {
-                            return $value;
-                        }
-                    }
-
-                    return null;
-                };
-
-                $normalizedRates = is_array($tronData['rates'] ?? null) ? $tronData['rates'] : $tronData;
-
-                if ($needsTrx) {
-                    $trxRate = $extractRate($resolveAssetData($normalizedRates, ['tron', 'trx', 'TRX'], 'TRX'), 'TRX');
-                    if ($trxRate === null) {
-                        $missingKeys[] = 'TRX';
-                    } else {
-                        $result['TRX'] = round($trxRate / 10, 2);
-                    }
-                }
-
-                if ($needsTon) {
-                    $tonRate = $extractRate($resolveAssetData($normalizedRates, ['toncoin', 'ton', 'TON'], 'Ton'), 'Ton');
-                    if ($tonRate === null) {
-                        $missingKeys[] = 'Ton';
-                    } else {
-                        $result['Ton'] = round($tonRate / 10, 2);
-                    }
-                }
+                $usdToIrr = $usdPrice;
             }
         }
     }
 
+    if ($usdToIrr === null) {
+        if ($needsTrx) {
+            $missingKeys[] = 'TRX';
+        }
+        if ($needsTon) {
+            $missingKeys[] = 'Ton';
+        }
+        if ($needsUsd) {
+            $missingKeys[] = 'USD';
+        }
+
+        $ok = empty($missingKeys);
+        return ['ok' => $ok, 'result' => $result];
+    }
+
+    $fetchCoinPrice = static function (string $id) use ($context) {
+        $endpoint = 'https://api.coingecko.com/api/v3/simple/price?ids='
+            . rawurlencode($id)
+            . '&vs_currencies=usd';
+
+        $response = @file_get_contents($endpoint, false, $context);
+        if ($response === false) {
+            return null;
+        }
+
+        $data = json_decode($response, true);
+        if (!is_array($data) || !isset($data[$id]['usd']) || !is_numeric($data[$id]['usd'])) {
+            return null;
+        }
+
+        $value = (float) $data[$id]['usd'];
+        if ($value <= 0.0 || !is_finite($value)) {
+            return null;
+        }
+
+        return $value; 
+    };
+
+    $toToman = static function (float $rialValue) {
+
+        return round($rialValue / 10, 2);
+    };
+
+    if ($needsTrx) {
+
+        $trxUsd = $fetchCoinPrice('tron');
+        if ($trxUsd === null) {
+            error_log('Missing or invalid TRX price from CoinGecko');
+            $missingKeys[] = 'TRX';
+        } else {
+            $trxIrr       = $trxUsd * $usdToIrr;   
+            $result['TRX'] = $toToman($trxIrr);    
+        }
+    }
+
+    if ($needsTon) {
+        $tonUsd = $fetchCoinPrice('toncoin');
+        if ($tonUsd === null) {
+            error_log('Missing or invalid Ton price from CoinGecko');
+            $missingKeys[] = 'Ton';
+        } else {
+            $tonIrr        = $tonUsd * $usdToIrr;
+            $result['Ton'] = $toToman($tonIrr);
+        }
+    }
+
     if ($needsUsd) {
-        $usdResponse = @file_get_contents('https://sarfe.erfjab.com/api/prices', false, $context);
-        if ($usdResponse === false) {
-            error_log('Failed to fetch USD price from Sarfe API');
+
+        $usdtUsd = $fetchCoinPrice('tether');
+        if ($usdtUsd === null) {
+            error_log('Missing or invalid USDT price from CoinGecko');
             $missingKeys[] = 'USD';
         } else {
-            $usdData = json_decode($usdResponse, true);
-            if (!is_array($usdData)) {
-                error_log('Invalid response received from Sarfe API');
-                $missingKeys[] = 'USD';
-            } else {
-                $usdPrice = null;
-                $usdRawValues = [];
-                foreach (['usd1', 'usd2'] as $usdKey) {
-                    if (!array_key_exists($usdKey, $usdData)) {
-                        continue;
-                    }
-
-                    $rawValue = $usdData[$usdKey];
-                    $usdRawValues[$usdKey] = $rawValue;
-
-                    if (is_string($rawValue)) {
-                        $normalizedValue = preg_replace('/[^\d\.\-]/u', '', $rawValue);
-                    } elseif (is_numeric($rawValue)) {
-                        $normalizedValue = (string) $rawValue;
-                    } else {
-                        continue;
-                    }
-
-                    if (!is_numeric($normalizedValue)) {
-                        continue;
-                    }
-
-                    $numericValue = abs((float) $normalizedValue);
-                    if ($numericValue > 0.0) {
-                        $usdPrice = $numericValue;
-                        break;
-                    }
-                }
-
-                if ($usdPrice === null) {
-                    $rawLog = '';
-                    if (!empty($usdRawValues)) {
-                        $rawLog = ' Raw values: ' . json_encode($usdRawValues);
-                    }
-                    error_log('Missing USD price from Sarfe API.' . $rawLog);
-                    $missingKeys[] = 'USD';
-                } else {
-                    $result['USD'] = round($usdPrice, 2);
-                }
-            }
+            $usdtIrr       = $usdtUsd * $usdToIrr;
+            $result['USD'] = $toToman($usdtIrr);
         }
     }
 
@@ -1589,7 +1460,6 @@ function outputlunksub($url)
     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
 
-
     $headers = array();
     $headers[] = 'Accept: application/json';
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
@@ -1803,7 +1673,7 @@ function DirectPayment($order_id, $image = 'images.jpg')
                     update("user", "Balance", $Balance_prim, "id", $Balance_id['affiliates']);
                     $result = number_format($result);
                     $textadd = "🎁  پرداخت پورسانت 
-        
+
         مبلغ $result تومان به حساب شما از طرف  زیر مجموعه تان به کیف پول شما واریز گردید";
                     $textreportport = "
 مبلغ $result به کاربر {$Balance_id['affiliates']} برای پورسانت از کاربر {$Balance_id['id']} واریز گردید 
@@ -1832,7 +1702,7 @@ function DirectPayment($order_id, $image = 'images.jpg')
                 update("user", "Balance", $Balance_prim, "id", $Balance_id['affiliates']);
                 $result = number_format($result);
                 $textadd = "🎁  پرداخت پورسانت 
-        
+
         مبلغ $result تومان به حساب شما از طرف  زیر مجموعه تان به کیف پول شما واریز گردید";
                 $textreportport = "
 مبلغ $result به کاربر {$Balance_id['affiliates']} برای پورسانت از کاربر {$Balance_id['id']} واریز گردید 
@@ -2031,7 +1901,7 @@ $textonebuy
         }
         $priceproductformat = number_format($prodcut['price_product']);
         $textextend = "✅ تمدید برای سرویس شما با موفقیت صورت گرفت
- 
+
 ▫️نام سرویس : $usernamepanel
 ▫️نام محصول : {$prodcut['name_product']}
 ▫️مبلغ تمدید $priceproductformat تومان
@@ -2044,7 +1914,7 @@ $textonebuy
         }
         $timejalali = jdate('Y/m/d H:i:s');
         $text_report = "📣 جزئیات تمدید اکانت در ربات شما ثبت شد .
-    
+
 ▫️آیدی عددی کاربر : <code>{$Balance_id['id']}</code>
 ▫️نام کاربری کاربر : @{$Balance_id['username']}
 ▫️نام کاربری کانفیگ :$usernamepanel
@@ -2141,7 +2011,7 @@ $textonebuy
             update("user", "score", $scorenew, "id", $Balance_id['id']);
         }
         $textvolume = "✅ افزایش حجم برای سرویس شما با موفقیت صورت گرفت
- 
+
 ▫️نام سرویس  : {$steppay[0]}
 ▫️حجم اضافه : $volume گیگ
 
@@ -2163,7 +2033,7 @@ $textonebuy
         }
         update("invoice", "Status", "active", "id_invoice", $nameloc['id_invoice']);
         $text_report = "⭕️ یک کاربر حجم اضافه خریده است
-        
+
 اطلاعات کاربر : 
 🪪 آیدی عددی : {$Balance_id['id']}
 🛍 حجم خریداری شده  : $volumes گیگ
@@ -2241,7 +2111,7 @@ $textonebuy
             update("user", "score", $scorenew, "id", $Balance_id['id']);
         }
         $textextratime = "✅ افزایش زمان برای سرویس شما با موفقیت صورت گرفت
- 
+
 ▫️نام سرویس : {$steppay[0]}
 ▫️زمان اضافه : $tmieextra روز
 
@@ -2263,7 +2133,7 @@ $textonebuy
         }
         update("invoice", "Status", "active", "id_invoice", $nameloc['id_invoice']);
         $text_report = "⭕️ یک کاربر زمان اضافه خریده است
-        
+
 اطلاعات کاربر : 
 🪪 آیدی عددی : {$Balance_id['id']}
 🛍 زمان خریداری شده  : $volumes روز
@@ -2294,7 +2164,7 @@ $textonebuy
             Editmessagetext($from_id, $message_id, $textconfrom, $Confirm_pay);
         }
         sendmessage($Payment_report['id_user'], "💎 کاربر گرامی مبلغ {$Payment_report['price']} تومان به کیف پول شما واریز گردید با تشکراز پرداخت شما.
-                
+
 🛒 کد پیگیری شما: {$Payment_report['id_order']}", null, 'HTML');
     }
 }
