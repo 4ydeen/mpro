@@ -1219,13 +1219,12 @@ function ensureTableAndColumn(mysqli $mysqli, string $table, string $column): vo
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>⚙️ نصب خودکار ربات میرزا پرو</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazir-font@v30.1.0/dist/font-face.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
         * {
-            font-family: Vazir, sans-serif;
+            font-family: Arad, sans-serif;
         }
         .wizard-steps {
             display: flex;
@@ -1307,7 +1306,7 @@ function ensureTableAndColumn(mysqli $mysqli, string $table, string $column): vo
             display: inline-flex;
             align-items: center;
             gap: 10px;
-            font-family: Vazir, sans-serif;
+            font-family: Arad, sans-serif;
         }
         .wizard-btn-next {
             background: rgba(50, 184, 198, 0.2);
@@ -1467,7 +1466,7 @@ function ensureTableAndColumn(mysqli $mysqli, string $table, string $column): vo
             color: #fff;
             font-size: 15px;
             font-weight: 500;
-            font-family: Vazir, sans-serif;
+            font-family: Arad, sans-serif;
             cursor: pointer;
             transition: all 0.3s ease;
         }
