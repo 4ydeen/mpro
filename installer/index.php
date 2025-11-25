@@ -1584,7 +1584,7 @@ function ensureTableAndColumn(mysqli $mysqli, string $table, string $column): vo
                         <div class="server-type-card <?php echo ($serverType === 'server') ? 'active' : ''; ?>" data-server-type="server">
                             <input type="radio" name="server_type" value="server" id="server" <?php echo ($serverType === 'server') ? 'checked' : ''; ?>>
                             <h3><i class="fas fa-cloud"></i> سرور</h3>
-                            <p>نصب روی سرور (مسیر: /var/www/html/mirzabotconfig)</p>
+                            <p>نصب روی سرور (مسیر: /var/www/html/)</p>
                         </div>
                     </div>
                 </div>
