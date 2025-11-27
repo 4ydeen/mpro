@@ -303,6 +303,16 @@ try {
     $zip = new ZipArchive();
     if ($zip->open($zip_file_name, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true) {
         $zip->addFile($backup_file_name, basename($backup_file_name));
+
+        $vpnbotPath = $sourcefir . '/vpnbot';
+        if (is_dir($vpnbotPath)) {
+            addPathToZip($zip, $vpnbotPath, $sourcefir . '/');
+        } else {
+            logMessage('WARNING', 'vpnbot directory not found for inclusion in backup zip', [
+                'path' => $vpnbotPath,
+            ]);
+        }
+
         $zip->close();
         if (!file_exists($zip_file_name) || filesize($zip_file_name) === 0) {
             logMessage('ERROR', 'Zip file is empty or does not exist', ['file' => $zip_file_name]);
