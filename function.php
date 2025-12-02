@@ -1228,153 +1228,126 @@ function trnado($order_id, $price)
 {
     global $domainhosts;
 
+    $errorId = 'TRN-' . bin2hex(random_bytes(4));
+
     $apitronseller = select("PaySetting", "*", "NamePay", "apiternado", "select")['ValuePay'];
     $walletSetting = select("PaySetting", "*", "NamePay", "walletaddress", "select");
     $walletaddress = trim((string) ($walletSetting['ValuePay'] ?? ''));
     $configuredUrl = trim((string) (select("PaySetting", "*", "NamePay", "urlpaymenttron", "select")['ValuePay'] ?? ''));
 
-    $defaultEndpoints = defined('TRONADO_ORDER_TOKEN_ENDPOINTS') ? TRONADO_ORDER_TOKEN_ENDPOINTS : [];
-
-    if (empty($defaultEndpoints)) {
-        $defaultEndpoints = ['https://bot.tronado.cloud/api/v1/Order/GetOrderToken'];
+    if ($configuredUrl === '') {
+        $configuredUrl = 'https://bot.tronado.cloud/api/v3/GetOrderToken';
     }
-
-    $endpoints = $defaultEndpoints;
-    if ($configuredUrl !== '') {
-        array_unshift($endpoints, $configuredUrl);
-        $endpoints = array_values(array_unique($endpoints));
-    }
-
-    $callbackUrl = 'https://' . $domainhosts . '/payment/tronado.php';
-    $requestPayload = [
-        'PaymentID' => (string) $order_id,
-        'Amount' => is_numeric($price) ? (float) $price : $price,
-        'Wallet' => $walletaddress,
-        'CallbackUrl' => $callbackUrl,
-        'OrderId' => (string) $order_id,
-        'Metadata' => [
-            'PaymentID' => (string) $order_id,
-        ],
-    ];
 
     if ($walletaddress === '') {
-        return [
-            'success' => false,
-            'error' => 'آدرس کیف پول تنظیم نشده است',
+        $lastErrorPayload = [
+            'success'  => false,
+            'error'    => 'آدرس کیف پول تنظیم نشده است',
+            'error_id' => $errorId,
         ];
+        error_log('[Tronado] ' . json_encode($lastErrorPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        return $lastErrorPayload;
     }
 
-    $payloadJson = json_encode($requestPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    $lastErrorPayload = [
-        'success' => false,
-        'error' => 'Failed to contact Tronado gateway',
+    $trxAmountStr = number_format((float)$price, 6, '.', '');
+
+    $callbackUrl = 'https://' . $domainhosts . '/payment/tronado.php';
+
+    $fields = [
+        'PaymentID'                  => (string)$order_id,
+        'WalletAddress'              => $walletaddress,
+        'TronAmount'                 => $trxAmountStr,
+        'CallbackUrl'                => $callbackUrl,
+        'wageFromBusinessPercentage' => '0',
+        'apiVersion'                 => '1',
     ];
 
-    foreach ($endpoints as $endpoint) {
-        if ($endpoint === '') {
-            continue;
-        }
+    $ch = curl_init($configuredUrl);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $fields, 
+        CURLOPT_HTTPHEADER     => [
+            'x-api-key: ' . $apitronseller,
+        ],
+        CURLOPT_TIMEOUT        => 20,
+    ]);
 
-        $curl = curl_init();
-        curl_setopt_array($curl, array(
-            CURLOPT_URL => $endpoint,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_ENCODING => '',
-            CURLOPT_MAXREDIRS => 10,
-            CURLOPT_TIMEOUT => 0,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_CUSTOMREQUEST => 'POST',
-            CURLOPT_POSTFIELDS => $payloadJson,
-            CURLOPT_HTTPHEADER => array(
-                'x-api-key: ' . $apitronseller,
-                'Content-Type: application/json',
-            ),
-        ));
+    $response = curl_exec($ch);
+    $errno    = curl_errno($ch);
+    $errstr   = curl_error($ch);
+    $status   = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    curl_close($ch);
 
-        $response = curl_exec($curl);
-        $curlErrno = curl_errno($curl);
-        $curlError = curl_error($curl);
-        $curlInfo = curl_getinfo($curl);
-        $statusCode = $curlInfo['http_code'] ?? null;
-
-        $responseExcerpt = '';
-        if ($response !== false && $response !== null) {
-            $responseExcerpt = function_exists('mb_substr') ? mb_substr($response, 0, 500) : substr($response, 0, 500);
-        }
-
-        $attemptLog = [
-            'method' => 'POST',
-            'url' => $endpoint,
-            'http_code' => $statusCode,
+    if ($errno) {
+        $lastErrorPayload = [
+            'success'  => false,
+            'error'    => "cURL error ($errno): $errstr",
+            'http'     => $status,
+            'error_id' => $errorId,
         ];
-        if ($responseExcerpt !== '') {
-            $attemptLog['response_excerpt'] = $responseExcerpt;
-        }
-        if ($curlError !== '') {
-            $attemptLog['curl_error'] = $curlError;
-        }
+        error_log('[Tronado] ' . json_encode($lastErrorPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        return $lastErrorPayload;
+    }
 
-        error_log('Tronado request attempt: ' . json_encode($attemptLog, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    if ($status < 200 || $status >= 300) {
+        $lastErrorPayload = [
+            'success'  => false,
+            'error'    => "HTTP $status",
+            'http'     => $status,
+            'body'     => mb_substr((string)$response, 0, 500, 'UTF-8'),
+            'error_id' => $errorId,
+        ];
+        error_log('[Tronado] ' . json_encode($lastErrorPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        return $lastErrorPayload;
+    }
 
-        if ($response === false) {
+    $json = json_decode((string)$response, true);
+    if (!is_array($json)) {
+        $lastErrorPayload = [
+            'success'  => false,
+            'error'    => 'پاسخ نامعتبر از ترنادو',
+            'body'     => mb_substr((string)$response, 0, 500, 'UTF-8'),
+            'error_id' => $errorId,
+        ];
+        error_log('[Tronado] ' . json_encode($lastErrorPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        return $lastErrorPayload;
+    }
+
+    if (!empty($json['IsSuccessful'])) {
+        $token = $json['Data']['Token'] ?? null;
+        if (!$token) {
             $lastErrorPayload = [
-                'success' => false,
-                'error' => $curlError !== '' ? $curlError : 'cURL execution failed',
-                'status_code' => $statusCode,
-                'errno' => $curlErrno,
-                'url' => $endpoint,
+                'success'  => false,
+                'error'    => 'Token خالی در پاسخ موفق ترنادو',
+                'raw'      => $json,
+                'error_id' => $errorId,
             ];
-            curl_close($curl);
-            continue;
-        }
-
-        if ($statusCode !== null && $statusCode >= 400) {
-            $lastErrorPayload = [
-                'success' => false,
-                'error' => 'Unexpected HTTP status code returned',
-                'status_code' => $statusCode,
-                'raw_response' => $response,
-                'url' => $endpoint,
-            ];
-
-            curl_close($curl);
-
-            if ($statusCode === 404) {
-                continue;
-            }
-
-            error_log('Tronado payment request failed: ' . json_encode($lastErrorPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-
+            error_log('[Tronado] ' . json_encode($lastErrorPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
             return $lastErrorPayload;
         }
 
-        $decodedResponse = json_decode($response, true);
-        if (!is_array($decodedResponse) || !array_key_exists('IsSuccessful', $decodedResponse) || !array_key_exists('Data', $decodedResponse)) {
-            $errorPayload = [
-                'success' => false,
-                'error' => 'Invalid response structure received from Tronado gateway',
-                'status_code' => $statusCode,
-                'raw_response' => $response,
-                'url' => $endpoint,
-            ];
-
-            error_log('Tronado payment invalid response: ' . json_encode($errorPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-
-            curl_close($curl);
-
-            return $errorPayload;
-        }
-
-        curl_close($curl);
-
-        return $decodedResponse;
+        return [
+            'success'        => true,
+            'IsSuccessful'   => true,
+            'Data'           => ['Token' => $token],
+            'FullPaymentUrl' => $json['Data']['FullPaymentUrl'] ?? null,
+            'raw'            => $json,
+            'error_id'       => $errorId,
+        ];
     }
 
-    error_log('Tronado payment request failed: ' . json_encode($lastErrorPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-
+    $lastErrorPayload = [
+        'success'  => false,
+        'error'    => $json['Message'] ?? 'خطای نامشخص ترنادو',
+        'code'     => $json['Code'] ?? null,
+        'raw'      => $json,
+        'error_id' => $errorId,
+    ];
+    error_log('[Tronado] ' . json_encode($lastErrorPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     return $lastErrorPayload;
 }
+
 function formatBytes($bytes, $precision = 2): string
 {
     $base = log($bytes, 1024);
