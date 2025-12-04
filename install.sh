@@ -3345,3 +3345,4 @@ process_arguments() {
 }
 
 process_arguments "$1" "$2"
+
