@@ -608,6 +608,18 @@ function runCompleteMigration($dbInfo, $adminNumber, &$migrationLog) {
             $connect->query($sql);
             $migrationLog[] = "✅ ایجاد setting";
         }
+        $migrationLog[] = "📋 بخش 2.2: channels";
+        $connect->query("DROP TABLE IF EXISTS `channels`");
+        $sql = "CREATE TABLE `channels` (
+            `remark` varchar(200) NOT NULL,
+            `linkjoin` varchar(200) NOT NULL,
+            `link` varchar(200) NOT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        if ($connect->query($sql) === TRUE) {
+            $migrationLog[] = "✅ ایجاد channels";
+        } else {
+            $migrationLog[] = "⚠️ عدم توانایی ایجاد channels: " . $connect->error;
+        }
         $migrationLog[] = "📋 بخش 2.5: topicid";
         $connect->query("DROP TABLE IF EXISTS `topicid`");
         $sql = "CREATE TABLE `topicid` (
@@ -1538,19 +1550,10 @@ function ensureTableAndColumn(mysqli $mysqli, string $table, string $column): vo
             <a class="submit-success" href="https://t.me/<?php echo $tgBot['details']['result']['username']; ?>"><i class="fas fa-robot"></i> رفتن به ربات <?php echo "‎@".$tgBot['details']['result']['username']; ?> »</a>
             <div style="text-align: center; margin-top: 20px; font-size: 18px; color: #28a745;">
                 <p>نصب با موفقیت تکمیل شد! <i class="fas fa-gift"></i></p>
-                <p>پوشه Installer بعد از <span id="countdown">10</span> ثانیه به طور خودکار حذف خواهد شد.</p>
+                <p>در حال حذف پوشه Installer ...</p>
             </div>
             <script>
-                let timeLeft = 10;
-                const countdownElement = document.getElementById('countdown');
-                const timer = setInterval(() => {
-                    timeLeft--;
-                    countdownElement.textContent = timeLeft;
-                    if (timeLeft <= 0) {
-                        clearInterval(timer);
-                        window.location.href = 'delete_installer.php';
-                    }
-                }, 1000);
+                window.location.href = 'delete_installer.php';
             </script>
         <?php endif; ?>
         <form id="installer-form" <?php if($success) { echo 'style="display:none;"'; } ?> method="post" enctype="multipart/form-data">
