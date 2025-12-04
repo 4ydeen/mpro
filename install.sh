@@ -2385,87 +2385,89 @@ function remove_domain() {
 
 delete_cron_jobs() {
     local CRON_FILE="/var/spool/cron/crontabs/www-data"
-    echo -e "\033[33mReading cron jobs for www-data...\033[0m"
+    while true; do
+        clear
+        echo -e "\033[33mReading cron jobs for www-data...\033[0m"
 
-    if [ ! -f "$CRON_FILE" ]; then
-        echo -e "\033[31m[ERROR]\033[0m Cron file not found at $CRON_FILE."
-        read -p "Press Enter to return to main menu..."
-        show_menu
-        return 1
-    fi
+        if [ ! -f "$CRON_FILE" ]; then
+            echo -e "\033[31m[ERROR]\033[0m Cron file not found at $CRON_FILE."
+            read -p "Press Enter to return to main menu..."
+            show_menu
+            return 1
+        fi
 
-    mapfile -t CRON_LINES < <(grep -v '^[[:space:]]*#' "$CRON_FILE" | sed '/^[[:space:]]*$/d')
+        mapfile -t CRON_LINES < <(grep -v '^[[:space:]]*#' "$CRON_FILE" | sed '/^[[:space:]]*$/d')
 
-    if [ ${#CRON_LINES[@]} -eq 0 ]; then
-        echo -e "\033[33m[INFO]\033[0m No cron entries found for www-data."
-        read -p "Press Enter to return to main menu..."
-        show_menu
-        return 0
-    fi
+        if [ ${#CRON_LINES[@]} -eq 0 ]; then
+            echo -e "\033[33m[INFO]\033[0m No cron entries found for www-data."
+            read -p "Press Enter to return to main menu..."
+            show_menu
+            return 0
+        fi
 
-    echo -e "\033[36mExisting cron entries:\033[0m"
-    for idx in "${!CRON_LINES[@]}"; do
-        printf "%d) %s\n" $((idx + 1)) "${CRON_LINES[$idx]}"
+        echo -e "\033[36mExisting cron entries:\033[0m"
+        for idx in "${!CRON_LINES[@]}"; do
+            printf "%d) %s\n" $((idx + 1)) "${CRON_LINES[$idx]}"
+        done
+        echo -e "\033[1;31m0) Exit to Main Menu\033[0m"
+        echo ""
+
+        read -p "Select a cron entry to delete [0-${#CRON_LINES[@]}]: " selection
+        if [[ "$selection" == "0" ]]; then
+            echo -e "\033[33mReturning to main menu...\033[0m"
+            sleep 1
+            show_menu
+            return 0
+        fi
+
+        if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#CRON_LINES[@]} ]; then
+            echo -e "\033[31m[ERROR]\033[0m Invalid selection."
+            sleep 1.5
+            continue
+        fi
+
+        local backup="${CRON_FILE}.bak.$(date +%s)"
+        local tmp
+        tmp=$(mktemp)
+
+        if ! sudo cp -a "$CRON_FILE" "$backup"; then
+            echo -e "\033[31m[ERROR]\033[0m Failed to create backup of the cron file."
+            read -p "Press Enter to return to main menu..."
+            show_menu
+            return 1
+        fi
+
+        if ! sudo awk -v target="$selection" 'BEGIN{idx=0}
+        {
+            line=$0
+            if (line ~ /^[[:space:]]*$/) {print; next}
+            if (line ~ /^[[:space:]]*#/) {print; next}
+            idx++
+            if (idx==target) next
+            print
+        }' "$CRON_FILE" > "$tmp"; then
+            echo -e "\033[31m[ERROR]\033[0m Failed to update cron file. Backup stored at '"'"'$backup'"'"'."
+            rm -f "$tmp"
+            read -p "Press Enter to return to main menu..."
+            show_menu
+            return 1
+        fi
+
+        if ! sudo mv "$tmp" "$CRON_FILE"; then
+            echo -e "\033[31m[ERROR]\033[0m Failed to overwrite cron file. Backup stored at $backup."
+            rm -f "$tmp"
+            read -p "Press Enter to return to main menu..."
+            show_menu
+            return 1
+        fi
+
+        sudo chown --reference "$backup" "$CRON_FILE" 2>/dev/null || true
+        sudo chmod --reference "$backup" "$CRON_FILE" 2>/dev/null || true
+
+        echo -e "\033[32m[SUCCESS]\033[0m Cron entry #$selection deleted."
+        echo -e "\033[33mBackup saved to: $backup\033[0m"
+        sleep 1.5
     done
-    echo ""
-
-    read -p "Select a cron entry to delete [1-${#CRON_LINES[@]}] or 'q' to cancel: " selection
-    if [[ "$selection" =~ ^[Qq]$ ]]; then
-        echo -e "\033[33mCancelled. No changes made.\033[0m"
-        sleep 1
-        show_menu
-        return 0
-    fi
-
-    if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#CRON_LINES[@]} ]; then
-        echo -e "\033[31m[ERROR]\033[0m Invalid selection."
-        sleep 1
-        show_menu
-        return 1
-    fi
-
-    local backup="${CRON_FILE}.bak.$(date +%s)"
-    local tmp
-    tmp=$(mktemp)
-
-    if ! sudo cp -a "$CRON_FILE" "$backup"; then
-        echo -e "\033[31m[ERROR]\033[0m Failed to create backup of the cron file."
-        read -p "Press Enter to return to main menu..."
-        show_menu
-        return 1
-    fi
-
-    if ! sudo awk -v target="$selection" 'BEGIN{idx=0}
-    {
-        line=$0
-        if (line ~ /^[[:space:]]*$/) {print; next}
-        if (line ~ /^[[:space:]]*#/) {print; next}
-        idx++
-        if (idx==target) next
-        print
-    }' "$CRON_FILE" > "$tmp"; then
-        echo -e "\033[31m[ERROR]\033[0m Failed to update cron file. Backup stored at $backup."
-        rm -f "$tmp"
-        read -p "Press Enter to return to main menu..."
-        show_menu
-        return 1
-    fi
-
-    if ! sudo mv "$tmp" "$CRON_FILE"; then
-        echo -e "\033[31m[ERROR]\033[0m Failed to overwrite cron file. Backup stored at $backup."
-        rm -f "$tmp"
-        read -p "Press Enter to return to main menu..."
-        show_menu
-        return 1
-    fi
-
-    sudo chown --reference "$backup" "$CRON_FILE" 2>/dev/null || true
-    sudo chmod --reference "$backup" "$CRON_FILE" 2>/dev/null || true
-
-    echo -e "\033[32m[SUCCESS]\033[0m Cron entry #$selection deleted."
-    echo -e "\033[33mBackup saved to: $backup\033[0m"
-    read -p "Press Enter to return to main menu..."
-    show_menu
 }
 function install_additional_bot() {
     clear
