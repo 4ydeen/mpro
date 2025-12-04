@@ -1718,7 +1718,7 @@ function ensureTableAndColumn(mysqli $mysqli, string $table, string $column): vo
             <input type="hidden" name="current_install_field" id="current_install_field" value="<?php echo $currentInstallField; ?>">
         </form>
         <footer>
-            <p>MirzabotPro Installer , Made by ♥️ | <a href="https://github.com/Mmd-Amir/mirza_pro/releases/">Github</a> | <a href="https://t.me/+TDJJIwuYUsozMzI0">Telegram</a> | &copy; <?php echo date('Y'); ?></p>
+            <p>MirzabotPro Installer , Made by ♥️ | <a href="https://github.com/Mmd-Amir/mirza_pro/releases/">Github</a> | <a href="https://t.me/+COMDGvsapck0NzE0">Telegram</a> | &copy; <?php echo date('Y'); ?></p>
         </footer>
     </div>
         <script>
