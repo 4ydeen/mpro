@@ -211,46 +211,6 @@ try {
     $destination = __DIR__;
     $setting = select("setting", "*");
     $sourcefir = dirname($destination);
-    $botlist = select("botsaz", "*", null, null, "fetchAll");
-    if ($botlist) {
-        foreach ($botlist as $bot) {
-            try {
-                $folderName = $bot['id_user'] . $bot['username'];
-                $botBasePath = $sourcefir . '/vpnbot/' . $folderName;
-                $zipFilePath = $destination . '/file_' . $folderName . '.zip';
-                $zip = new ZipArchive();
-                if ($zip->open($zipFilePath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true) {
-                    $pathsToBackup = [
-                        $botBasePath . '/data',
-                        $botBasePath . '/product.json',
-                        $botBasePath . '/product_name.json',
-                    ];
-                    foreach ($pathsToBackup as $path) {
-                        if (file_exists($path)) {
-                            addPathToZip($zip, $path, $botBasePath . '/');
-                        }
-                    }
-                    $zip->close();
-                    telegram('sendDocument', [
-                        'chat_id' => $setting['Channel_Report'],
-                        'message_thread_id' => $reportbackup,
-                        'document' => new CURLFile($zipFilePath),
-                        'caption' => "@{$bot['username']} | {$bot['id_user']}",
-                    ]);
-                    if (file_exists($zipFilePath)) {
-                        unlink($zipFilePath);
-                    }
-                } else {
-                    logMessage('ERROR', 'Unable to create zip archive for bot directory', [
-                        'bot' => $bot['username'],
-                        'path' => $botBasePath
-                    ]);
-                }
-            } catch (Throwable $e) {
-                logException($e, ['bot' => $bot['username'], 'id' => $bot['id_user']]);
-            }
-        }
-    }
     $backup_file_name = 'backup_' . date("Y-m-d") . '.sql';
     $zip_file_name = 'backup_' . date("Y-m-d") . '.zip';
     $dumpCreated = false;
