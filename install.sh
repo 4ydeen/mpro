@@ -2396,7 +2396,18 @@ delete_cron_jobs() {
             return 1
         fi
 
-        mapfile -t CRON_LINES < <(grep -v '^[[:space:]]*#' "$CRON_FILE" | sed '/^[[:space:]]*$/d')
+        if ! sudo cat "$CRON_FILE" >/dev/null 2>&1; then
+            echo -e "\033[31m[ERROR]\033[0m Cannot read $CRON_FILE (permission denied)."
+            read -p "Press Enter to return to main menu..."
+            show_menu
+            return 1
+        fi
+
+        mapfile -t CRON_LINES < <(sudo awk '
+            /^[[:space:]]*#/ {next}
+            /^[[:space:]]*$/ {next}
+            {print}
+        ' "$CRON_FILE")
 
         if [ ${#CRON_LINES[@]} -eq 0 ]; then
             echo -e "\033[33m[INFO]\033[0m No cron entries found for www-data."
@@ -2426,16 +2437,8 @@ delete_cron_jobs() {
             continue
         fi
 
-        local backup="${CRON_FILE}.bak.$(date +%s)"
         local tmp
         tmp=$(mktemp)
-
-        if ! sudo cp -a "$CRON_FILE" "$backup"; then
-            echo -e "\033[31m[ERROR]\033[0m Failed to create backup of the cron file."
-            read -p "Press Enter to return to main menu..."
-            show_menu
-            return 1
-        fi
 
         if ! sudo awk -v target="$selection" 'BEGIN{idx=0}
         {
@@ -2446,7 +2449,7 @@ delete_cron_jobs() {
             if (idx==target) next
             print
         }' "$CRON_FILE" > "$tmp"; then
-            echo -e "\033[31m[ERROR]\033[0m Failed to update cron file. Backup stored at '"'"'$backup'"'"'."
+            echo -e "\033[31m[ERROR]\033[0m Failed to update cron file."
             rm -f "$tmp"
             read -p "Press Enter to return to main menu..."
             show_menu
@@ -2454,18 +2457,17 @@ delete_cron_jobs() {
         fi
 
         if ! sudo mv "$tmp" "$CRON_FILE"; then
-            echo -e "\033[31m[ERROR]\033[0m Failed to overwrite cron file. Backup stored at $backup."
+            echo -e "\033[31m[ERROR]\033[0m Failed to overwrite cron file."
             rm -f "$tmp"
             read -p "Press Enter to return to main menu..."
             show_menu
             return 1
         fi
 
-        sudo chown --reference "$backup" "$CRON_FILE" 2>/dev/null || true
-        sudo chmod --reference "$backup" "$CRON_FILE" 2>/dev/null || true
+        sudo chown www-data:crontab "$CRON_FILE" 2>/dev/null || true
+        sudo chmod 600 "$CRON_FILE" 2>/dev/null || true
 
         echo -e "\033[32m[SUCCESS]\033[0m Cron entry #$selection deleted."
-        echo -e "\033[33mBackup saved to: $backup\033[0m"
         sleep 1.5
     done
 }
