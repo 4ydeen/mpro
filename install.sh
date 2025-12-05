@@ -2386,6 +2386,7 @@ function remove_domain() {
 delete_cron_jobs() {
     local CRON_FILE="/var/spool/cron/crontabs/www-data"
     while true; do
+        local delete_all selection tmp
         clear
         echo -e "\033[33mReading cron jobs for www-data...\033[0m"
 
@@ -2420,6 +2421,35 @@ delete_cron_jobs() {
         for idx in "${!CRON_LINES[@]}"; do
             printf "%d) %s\n" $((idx + 1)) "${CRON_LINES[$idx]}"
         done
+
+        read -p "Delete all detected cron jobs? (y/n): " delete_all
+        if [[ "$delete_all" =~ ^[Yy]$ ]]; then
+            tmp=$(mktemp)
+            if ! sudo awk '
+                /^[[:space:]]*#/ {print; next}
+                /^[[:space:]]*$/ {print; next}
+            ' "$CRON_FILE" > "$tmp"; then
+                echo -e "\033[31m[ERROR]\033[0m Failed to clean cron file."
+                rm -f "$tmp"
+                read -p "Press Enter to return to main menu..."
+                show_menu
+                return 1
+            fi
+            if ! sudo mv "$tmp" "$CRON_FILE"; then
+                echo -e "\033[31m[ERROR]\033[0m Failed to overwrite cron file."
+                rm -f "$tmp"
+                read -p "Press Enter to return to main menu..."
+                show_menu
+                return 1
+            fi
+            sudo chown www-data:crontab "$CRON_FILE" 2>/dev/null || true
+            sudo chmod 600 "$CRON_FILE" 2>/dev/null || true
+            echo -e "\033[32m[SUCCESS]\033[0m All detected cron jobs were deleted."
+            sleep 1.5
+            show_menu
+            return 0
+        fi
+
         echo -e "\033[1;31m0) Exit to Main Menu\033[0m"
         echo ""
 
@@ -2436,9 +2466,6 @@ delete_cron_jobs() {
             sleep 1.5
             continue
         fi
-
-        local tmp
-        tmp=$(mktemp)
 
         if ! sudo awk -v target="$selection" 'BEGIN{idx=0}
         {
@@ -3347,3 +3374,4 @@ process_arguments() {
 }
 
 process_arguments "$1" "$2"
+
