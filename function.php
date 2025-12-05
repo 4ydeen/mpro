@@ -2487,6 +2487,72 @@ function isClientIpInRange($clientIp, $lowerBound, $upperBound)
 
     return strcmp($clientPacked, $lowerPacked) >= 0 && strcmp($clientPacked, $upperPacked) <= 0;
 }
+
+function resolveCronHttpDirectory(): string
+{
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+
+    $configured = null;
+    if (defined('CRON_HTTP_BASE_PATH')) {
+        $configured = CRON_HTTP_BASE_PATH;
+    } elseif (($env = getenv('CRON_HTTP_BASE_PATH')) !== false) {
+        $configured = $env;
+    }
+
+    if (is_string($configured)) {
+        $configured = trim($configured);
+        if ($configured === '' || $configured === '/') {
+            return $cache = '';
+        }
+
+        return $cache = trim($configured, "/\\");
+    }
+
+    $preferredOrder = ['cronbot', 'cron'];
+    foreach ($preferredOrder as $candidate) {
+        $candidate = trim($candidate, "/\\");
+        if ($candidate === '') {
+            continue;
+        }
+
+        if (is_dir(APP_ROOT_PATH . '/' . $candidate)) {
+            return $cache = $candidate;
+        }
+    }
+
+    return $cache = 'cronbot';
+}
+
+function getCronHttpRelativePrefix(): string
+{
+    $directory = resolveCronHttpDirectory();
+    if ($directory === '') {
+        return '';
+    }
+
+    return trim($directory, "/\\") . '/';
+}
+
+function buildCronScriptUrlByHost(string $host, string $script): string
+{
+    $host = trim($host);
+    if ($host === '') {
+        $host = 'localhost';
+    }
+
+    $base = preg_match('~^https?://~i', $host) ? rtrim($host, '/') : 'https://' . $host;
+    $script = ltrim($script, '/');
+
+    $prefix = getCronHttpRelativePrefix();
+    if ($prefix !== '' && substr($prefix, -1) !== '/') {
+        $prefix .= '/';
+    }
+
+    return $base . '/' . $prefix . $script;
+}
 function addCronIfNotExists($cronCommand)
 {
     $commands = is_array($cronCommand) ? $cronCommand : [$cronCommand];
@@ -2555,26 +2621,305 @@ function activecron()
 {
     global $domainhosts;
 
-    $cronCommands = [
-        "*/15 * * * * curl https://$domainhosts/cronbot/statusday.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/croncard.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/NoticationsService.php",
-        "*/5 * * * * curl https://$domainhosts/cronbot/payment_expire.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/sendmessage.php",
-        "*/3 * * * * curl https://$domainhosts/cronbot/plisio.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/activeconfig.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/disableconfig.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/iranpay1.php",
-        "0 */5 * * * curl https://$domainhosts/cronbot/backupbot.php",
-        "*/2 * * * * curl https://$domainhosts/cronbot/gift.php",
-        "*/30 * * * * curl https://$domainhosts/cronbot/expireagent.php",
-        "*/15 * * * * curl https://$domainhosts/cronbot/on_hold.php",
-        "*/2 * * * * curl https://$domainhosts/cronbot/configtest.php",
-        "*/15 * * * * curl https://$domainhosts/cronbot/uptime_node.php",
-        "*/15 * * * * curl https://$domainhosts/cronbot/uptime_panel.php",
-    ];
+    $host = null;
+    if (isset($domainhosts) && is_string($domainhosts) && trim($domainhosts) !== '') {
+        $host = $domainhosts;
+    }
+
+    if ($host === null || trim((string) $host) === '') {
+        $host = $_SERVER['HTTP_HOST'] ?? null;
+    }
+
+    if ($host === null || trim((string) $host) === '') {
+        $host = 'localhost';
+    }
+
+    $normalizedHost = preg_match('~^https?://~i', $host)
+        ? rtrim($host, '/')
+        : 'https://' . trim($host, '/');
+
+    $cronEndpoint = $normalizedHost . '/cron/cron.php';
+
+    $cronCommands = ["*/1 * * * * curl {$cronEndpoint}"];
 
     addCronIfNotExists($cronCommands);
+}
+
+
+function getCronScheduleStoragePath(): string
+{
+    return APP_ROOT_PATH . '/cron_schedule.json';
+}
+
+function getCronJobDefinitions(): array
+{
+    return [
+        'statusday' => [
+            'script' => 'statusday.php',
+            'admin_label' => 'کرون وضعیت روزانه',
+            'instruction' => '🕒 بررسی وضعیت روزانه — %s',
+            'default' => ['unit' => 'minute', 'value' => 15],
+        ],
+        'croncard' => [
+            'script' => 'croncard.php',
+            'admin_label' => 'کرون کارت‌به‌کارت',
+            'instruction' => '💳 انجام تراکنش‌های کارت‌به‌کارت — %s',
+            'default' => ['unit' => 'minute', 'value' => 1],
+        ],
+        'notifications' => [
+            'script' => 'NoticationsService.php',
+            'admin_label' => 'کرون اعلان‌ها',
+            'instruction' => '🔔 سرویس اعلان‌ها (Notification Service) — %s',
+            'default' => ['unit' => 'minute', 'value' => 1],
+        ],
+        'payment_expire' => [
+            'script' => 'payment_expire.php',
+            'admin_label' => 'کرون انقضای پرداخت',
+            'instruction' => '💳 بررسی انقضای پرداخت‌ها — %s',
+            'default' => ['unit' => 'minute', 'value' => 5],
+        ],
+        'sendmessage' => [
+            'script' => 'sendmessage.php',
+            'admin_label' => 'کرون ارسال پیام',
+            'instruction' => '📩 ارسال پیام‌ها — %s',
+            'default' => ['unit' => 'minute', 'value' => 1],
+        ],
+        'plisio' => [
+            'script' => 'plisio.php',
+            'admin_label' => 'کرون Plisio',
+            'instruction' => '💰 پردازش پرداخت‌های Plisio — %s',
+            'default' => ['unit' => 'minute', 'value' => 3],
+        ],
+        'activeconfig' => [
+            'script' => 'activeconfig.php',
+            'admin_label' => 'کرون فعال‌سازی تنظیمات',
+            'instruction' => '⚙️ فعال‌سازی تنظیمات جدید — %s',
+            'default' => ['unit' => 'minute', 'value' => 1],
+        ],
+        'disableconfig' => [
+            'script' => 'disableconfig.php',
+            'admin_label' => 'کرون غیرفعال‌سازی تنظیمات',
+            'instruction' => '🚫 غیرفعال‌سازی تنظیمات قدیمی — %s',
+            'default' => ['unit' => 'minute', 'value' => 1],
+        ],
+        'iranpay' => [
+            'script' => 'iranpay1.php',
+            'admin_label' => 'کرون ایران‌پی',
+            'instruction' => '🇮🇷 بررسی وضعیت پرداخت ایران‌پی — %s',
+            'default' => ['unit' => 'minute', 'value' => 1],
+        ],
+        'backup' => [
+            'script' => 'backupbot.php',
+            'admin_label' => 'کرون بکاپ',
+            'instruction' => '🗂 تهیه نسخه‌ی پشتیبان (Backup) — %s',
+            'default' => ['unit' => 'hour', 'value' => 5],
+        ],
+        'gift' => [
+            'script' => 'gift.php',
+            'admin_label' => 'کرون هدایا',
+            'instruction' => '🎁 ارسال هدایا (Gift System) — %s',
+            'default' => ['unit' => 'minute', 'value' => 2],
+        ],
+        'lottery' => [
+            'script' => 'lottery.php',
+            'admin_label' => 'قرعه‌کشی شبانه',
+            'instruction' => '🎁 قرعه‌کشی شبانه — %s',
+            'default' => ['unit' => 'minute', 'value' => 1],
+        ],
+        'expireagent' => [
+            'script' => 'expireagent.php',
+            'admin_label' => 'کرون انقضای نمایندگان',
+            'instruction' => '👥 بررسی انقضای نمایندگان — %s',
+            'default' => ['unit' => 'minute', 'value' => 30],
+        ],
+        'on_hold' => [
+            'script' => 'on_hold.php',
+            'admin_label' => 'کرون سرویس‌های معلق',
+            'instruction' => '⏸ بررسی وضعیت سفارش‌های معلق — %s',
+            'default' => ['unit' => 'minute', 'value' => 15],
+        ],
+        'configtest' => [
+            'script' => 'configtest.php',
+            'admin_label' => 'کرون تست تنظیمات',
+            'instruction' => '🧪 تست تنظیمات سیستم — %s',
+            'default' => ['unit' => 'minute', 'value' => 2],
+        ],
+        'uptime_node' => [
+            'script' => 'uptime_node.php',
+            'admin_label' => 'کرون Uptime نود',
+            'instruction' => '🌐 بررسی Uptime نودها — %s',
+            'default' => ['unit' => 'minute', 'value' => 15],
+        ],
+        'uptime_panel' => [
+            'script' => 'uptime_panel.php',
+            'admin_label' => 'کرون Uptime پنل',
+            'instruction' => '🖥 بررسی Uptime پنل‌ها — %s',
+            'default' => ['unit' => 'minute', 'value' => 15],
+        ],
+    ];
+}
+
+function getDefaultCronSchedules(): array
+{
+    $defaults = [];
+    foreach (getCronJobDefinitions() as $key => $definition) {
+        $defaults[$key] = $definition['default'];
+    }
+
+    return $defaults;
+}
+
+function normalizeCronScheduleConfig(array $config, array $default): array
+{
+    $unit = isset($config['unit']) ? strtolower((string) $config['unit']) : $default['unit'];
+    $validUnits = ['minute', 'hour', 'day', 'disabled'];
+    if (!in_array($unit, $validUnits, true)) {
+        $unit = $default['unit'];
+    }
+
+    $value = isset($config['value']) ? (int) $config['value'] : $default['value'];
+    if ($unit === 'disabled') {
+        $value = 0;
+    } elseif ($value < 1) {
+        $value = $default['value'];
+    }
+
+    return [
+        'unit' => $unit,
+        'value' => $value,
+    ];
+}
+
+function loadCronSchedules(): array
+{
+    $schedules = getDefaultCronSchedules();
+    $storagePath = getCronScheduleStoragePath();
+    if (!is_readable($storagePath)) {
+        return $schedules;
+    }
+
+    $rawData = file_get_contents($storagePath);
+    if ($rawData === false) {
+        return $schedules;
+    }
+
+    $decoded = json_decode($rawData, true);
+    if (!is_array($decoded)) {
+        return $schedules;
+    }
+
+    foreach ($schedules as $key => $default) {
+        if (isset($decoded[$key]) && is_array($decoded[$key])) {
+            $schedules[$key] = normalizeCronScheduleConfig($decoded[$key], $default);
+        }
+    }
+
+    return $schedules;
+}
+
+function saveCronSchedules(array $schedules): bool
+{
+    $storagePath = getCronScheduleStoragePath();
+    $directory = dirname($storagePath);
+    if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+        error_log('Unable to create cron schedule directory: ' . $directory);
+        return false;
+    }
+
+    $normalized = [];
+    foreach (getDefaultCronSchedules() as $key => $default) {
+        $current = $schedules[$key] ?? $default;
+        $normalized[$key] = normalizeCronScheduleConfig($current, $default);
+    }
+
+    ksort($normalized);
+    $encoded = json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    if ($encoded === false) {
+        error_log('Unable to encode cron schedule configuration to JSON.');
+        return false;
+    }
+
+    return file_put_contents($storagePath, $encoded, LOCK_EX) !== false;
+}
+
+function updateCronSchedule(string $jobKey, array $config): bool
+{
+    $definitions = getCronJobDefinitions();
+    if (!isset($definitions[$jobKey])) {
+        return false;
+    }
+
+    $schedules = loadCronSchedules();
+    $schedules[$jobKey] = normalizeCronScheduleConfig($config, $definitions[$jobKey]['default']);
+
+    return saveCronSchedules($schedules);
+}
+
+function describeCronSchedule(array $config): string
+{
+    $unitLabels = [
+        'minute' => 'دقیقه',
+        'hour' => 'ساعت',
+        'day' => 'روز',
+        'disabled' => 'غیرفعال',
+    ];
+
+    $unit = $config['unit'] ?? 'minute';
+    $value = isset($config['value']) ? (int) $config['value'] : 1;
+    if ($value < 1) {
+        $value = 1;
+    }
+
+    if ($unit === 'disabled') {
+        return $unitLabels['disabled'];
+    }
+
+    $unitLabel = $unitLabels[$unit] ?? $unitLabels['minute'];
+    return sprintf('هر %d %s', $value, $unitLabel);
+}
+
+function shouldRunCronJob(array $config, int $minute, int $hour, int $dayOfYear): bool
+{
+    $unit = $config['unit'] ?? 'minute';
+    $value = isset($config['value']) ? (int) $config['value'] : 1;
+    if ($value < 1) {
+        $value = 1;
+    }
+
+    if ($unit === 'disabled') {
+        return false;
+    }
+
+    switch ($unit) {
+        case 'minute':
+            return $minute % $value === 0;
+        case 'hour':
+            return $minute === 0 && ($hour % $value === 0);
+        case 'day':
+            return $minute === 0 && $hour === 0 && ($dayOfYear % $value === 0);
+        default:
+            return false;
+    }
+}
+
+function buildCronInstructionDetails(string $domainHost): string
+{
+    $definitions = getCronJobDefinitions();
+    $schedules = loadCronSchedules();
+    $parts = [];
+
+    foreach ($definitions as $key => $definition) {
+        if (!isset($definition['instruction'], $definition['script'])) {
+            continue;
+        }
+        $schedule = $schedules[$key] ?? $definition['default'];
+        $description = describeCronSchedule($schedule);
+        $title = sprintf($definition['instruction'], $description);
+        $endpoint = buildCronScriptUrlByHost($domainHost, $definition['script']);
+        $parts[] = "<b>{$title}</b>\n<code>curl " . htmlspecialchars($endpoint, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "</code>";
+    }
+
+    return implode("\n\n", $parts);
 }
 
 function inlineFixer($str, int $count_button = 1)

@@ -264,6 +264,47 @@ function updatePanelStateInConfigFile($configPath, $state)
     return true;
 }
 
+function buildCronJobsKeyboard(): string
+{
+    if (!function_exists('getCronJobDefinitions') || !function_exists('loadCronSchedules') || !function_exists('describeCronSchedule')) {
+        return json_encode(['inline_keyboard' => []]);
+    }
+
+    $definitions = getCronJobDefinitions();
+    $schedules = loadCronSchedules();
+    $keyboard = ['inline_keyboard' => []];
+
+    foreach ($definitions as $key => $definition) {
+        if (empty($definition['admin_label']) || empty($definition['script'])) {
+            continue;
+        }
+        $schedule = $schedules[$key] ?? $definition['default'];
+        $keyboard['inline_keyboard'][] = [
+            ['text' => '⚙️ تنظیمات', 'callback_data' => "cronjob_config-{$key}"],
+            ['text' => describeCronSchedule($schedule), 'callback_data' => 'cronjob_display'],
+            ['text' => $definition['admin_label'], 'callback_data' => 'cronjob_display'],
+        ];
+    }
+
+    $keyboard['inline_keyboard'][] = [
+        ['text' => '🔙 بازگشت به منوی وضعیت', 'callback_data' => 'admin'],
+    ];
+
+    return json_encode($keyboard, JSON_UNESCAPED_UNICODE);
+}
+
+function getCronUnitTitle(string $unit): string
+{
+    $labels = [
+        'minute' => 'دقیقه',
+        'hour' => 'ساعت',
+        'day' => 'روز',
+        'disabled' => 'غیرفعال',
+    ];
+
+    return $labels[$unit] ?? $labels['minute'];
+}
+
 if (!in_array($from_id, $admin_ids))
     return;
 
@@ -273,19 +314,11 @@ if (!is_array($users_ids)) {
 }
 
 $domainhostsEscaped = htmlspecialchars($domainhosts, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-
-$miniAppInstructionText = <<<HTML
-📌 آموزش فعالسازی مینی اپ در ربات BotFather
-
-/mybots > Select Bot > Bot Setting >  Configure Mini App > Enable Mini App  > Edit Mini App URL
-
-مراحل بالا را طی کنید سپس آدرس زیر را ارسال نمایید :
-
-<code>https://{$domainhostsEscaped}/app/</code>
-
-➖➖➖➖➖➖➖➖➖➖➖➖
-⚙️ تنظیم کرون‌جاب‌ها در هاست
-
+$cronInstructionBlock = '';
+if (function_exists('buildCronInstructionDetails')) {
+    $cronInstructionBlock = buildCronInstructionDetails($domainhostsEscaped);
+} else {
+    $cronInstructionBlock = <<<CRONHTML
 <b>🕒 بررسی وضعیت روزانه — هر 15 دقیقه</b>
 <code>curl https://{$domainhostsEscaped}/cronbot/statusday.php</code>
 
@@ -310,7 +343,7 @@ $miniAppInstructionText = <<<HTML
 <b>🇮🇷 بررسی وضعیت پرداخت ایران‌پی — هر 1 دقیقه</b>
 <code>curl https://{$domainhostsEscaped}/cronbot/iranpay1.php</code>
 
-<b>🗄 تهیه نسخه‌ی پشتیبان (Backup) — هر 5 ساعت</b>
+<b>🗂 تهیه نسخه‌ی پشتیبان (Backup) — هر 5 ساعت</b>
 <code>curl https://{$domainhostsEscaped}/cronbot/backupbot.php</code>
 
 <b>🎁 ارسال هدایا (Gift System) — هر 2 دقیقه</b>
@@ -333,6 +366,30 @@ $miniAppInstructionText = <<<HTML
 
 <b>💳 انجام تراکنش‌های کارت‌به‌کارت — هر 1 دقیقه</b>
 <code>curl https://{$domainhostsEscaped}/cronbot/croncard.php</code>
+CRONHTML;
+}
+
+$miniAppInstructionText = <<<HTML
+📌 آموزش فعالسازی مینی اپ در ربات BotFather
+
+/mybots > Select Bot > Bot Setting >  Configure Mini App > Enable Mini App  > Edit Mini App URL
+
+مراحل بالا را طی کنید سپس آدرس زیر را ارسال نمایید :
+
+<code>https://{$domainhostsEscaped}/app/</code>
+
+➖➖➖➖➖➖➖➖➖➖➖➖
+⚙️ تنظیم کرون‌جاب‌ها در هاست
+
+
+<b>⏱ تنها کرون‌جاب موردنیاز به صورت
+
+*/1
+
+ یعنی هر 1 دقیقه باید تنظیم کنید
+</b>
+
+<code>curl https://{$domainhostsEscaped}/cron/cron.php</code>
 HTML;
 
 if (in_array($text, $textadmin) || $datain == "admin") {
@@ -348,14 +405,7 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     sendmessage($from_id, $text_admin, $keyboardadmin, 'HTML');
     $miniAppInstructionHidden = isset($user['hide_mini_app_instruction']) ? (string) $user['hide_mini_app_instruction'] : '0';
     if ($miniAppInstructionHidden !== '1') {
-        $miniAppInstructionKeyboard = json_encode([
-            'inline_keyboard' => [
-                [
-                    ['text' => 'دیگر نمایش نده ⛓️‍💥', 'callback_data' => 'hide_mini_app_instruction'],
-                ],
-            ],
-        ]);
-        sendmessage($from_id, $miniAppInstructionText, $miniAppInstructionKeyboard, 'HTML');
+        sendmessage($from_id, $miniAppInstructionText, null, 'HTML');
     }
 } elseif ($text == $textbotlang['Admin']['backadmin']) {
     if ($buyreport == "0" || $otherservice == "0" || $otherreport == "0" || $paymentreports == "0" || $reporttest == "0" || $errorreport == "0") {
@@ -2850,6 +2900,11 @@ $caption";
                 ['text' => "❌ کرون حذف حجم", 'callback_data' => "none"],
             ],
             [
+                ['text' => "⚙️ مدیریت", 'callback_data' => "cronjobs_settings"],
+                ['text' => "⏱ نمایش لیست", 'callback_data' => "cronjobs_settings"],
+                ['text' => "زمان‌بندی کرون‌ها", 'callback_data' => "none"],
+            ],
+            [
                 ['text' => "⚙️ تنظیمات", 'callback_data' => "linkappsetting"],
                 ['text' => $btnstatuslinkapp, 'callback_data' => "editstsuts-linkappstatus-{$setting['linkappstatus']}"],
                 ['text' => "🔗لینک دانلود برنامه", 'callback_data' => "linkappstatus"],
@@ -3476,6 +3531,11 @@ $caption";
                 ['text' => "❌ کرون حذف حجم", 'callback_data' => "none"],
             ],
             [
+                ['text' => "⚙️ مدیریت", 'callback_data' => "cronjobs_settings"],
+                ['text' => "⏱ نمایش لیست", 'callback_data' => "cronjobs_settings"],
+                ['text' => "زمان‌بندی کرون‌ها", 'callback_data' => "none"],
+            ],
+            [
                 ['text' => "⚙️ تنظیمات", 'callback_data' => "linkappsetting"],
                 ['text' => $btnstatuslinkapp, 'callback_data' => "editstsuts-linkappstatus-{$setting['linkappstatus']}"],
                 ['text' => "🔗لینک دانلود برنامه", 'callback_data' => "linkappstatus"],
@@ -3518,13 +3578,14 @@ $caption";
 آموزش تنظیم گروه :
 1 - ابتدا یک گروه  بسازید 
 2 - ربات  @myidbot را عضو گروه کنید و دستور /getgroupid@myidbot داخل گروه ارسال کنید 
-3 - حالت تاپیک یا انجمن گروه را از تنظیمات گروه روشن کنید4
+3 - حالت تاپیک یا انجمن گروه را از تنظیمات گروه روشن کنید
 4 - ربات خودتان را ادمین گروه کنید 
 5 - آیدی عددی ارسال شده را در ربات ارسال کنید.
 
 آیدی عددی فعلی شما: {$setting['Channel_Report']}";
     sendmessage($from_id, $textreports, $backadmin, 'HTML');
     step('addchannelid', $from_id);
+
 } elseif ($user['step'] == "addchannelid") {
     $outputcheck = sendmessage($text, $textbotlang['Admin']['Channel']['TestChannel'], null, 'HTML');
     if (empty($outputcheck['ok'])) {
@@ -3540,14 +3601,25 @@ $caption";
         sendmessage($from_id, $texterror, null, 'HTML');
         return;
     }
+
     if ($outputcheck['result']['chat']['is_forum'] == false) {
-        $texterror = "❌ گروه انتخاب شده درحالت انجمن نیست ابتدا قابلیت تاپیک گروه را روشن کرده سپس آیدی عددی گروه را مجددا تنظیم نمایید";
+        $texterror = "❌ گروه انتخاب شده درحالت انجمن نیست از تنظیمات گروه حالت تاپیک گروه را روشن کرده سپس آیدی عددی گروه را مجددا تنظیم نمایید";
         sendmessage($from_id, $texterror, null, 'HTML');
         return;
     }
+
+    // --- جدید: ریست کردن تاپیک‌های پورسانت/شبانه/اطلاع‌رسانی/بکاپ برای گروه جدید ---
+    $resetReports = ['porsantreport', 'reportnight', 'reportcron', 'backupfile'];
+    foreach ($resetReports as $reportKey) {
+        update("topicid", "idreport", 0, "report", $reportKey);
+    }
+
+    // --- ساخت تاپیک‌ها با فاصله‌ی ۵ ثانیه ---
+
+    // 🛍 گزارش های خرید
     $createForumTopic = telegram('createForumTopic', [
         'chat_id' => $text,
-        'name' => "🛍 گزارش های خرید"
+        'name'   => "🛍 گزارش های خرید"
     ]);
     if (!$createForumTopic['ok']) {
         $texterror = "❌ ربات ادمین گروه نیست";
@@ -3557,9 +3629,11 @@ $caption";
     if ($buyreport != $createForumTopic['result']['message_thread_id']) {
         update("topicid", "idreport", $createForumTopic['result']['message_thread_id'], "report", "buyreport");
     }
+    sleep(5);
+
     $createForumTopic = telegram('createForumTopic', [
         'chat_id' => $text,
-        'name' => "📌 گزارش خرید خدمات"
+        'name'   => "📌 گزارش خرید خدمات"
     ]);
     if (!$createForumTopic['ok']) {
         $texterror = "❌ ربات ادمین گروه نیست";
@@ -3569,9 +3643,11 @@ $caption";
     if ($otherservice != $createForumTopic['result']['message_thread_id']) {
         update("topicid", "idreport", $createForumTopic['result']['message_thread_id'], "report", "otherservice");
     }
+    sleep(5);
+
     $createForumTopic = telegram('createForumTopic', [
         'chat_id' => $text,
-        'name' => "🔑 گزارش اکانت تست"
+        'name'   => "🔑 گزارش اکانت تست"
     ]);
     if (!$createForumTopic['ok']) {
         $texterror = "❌ ربات ادمین گروه نیست";
@@ -3581,9 +3657,11 @@ $caption";
     if ($reporttest != $createForumTopic['result']['message_thread_id']) {
         update("topicid", "idreport", $createForumTopic['result']['message_thread_id'], "report", "reporttest");
     }
+    sleep(5);
+
     $createForumTopic = telegram('createForumTopic', [
         'chat_id' => $text,
-        'name' => "⚙️ سایر گزارشات"
+        'name'   => "⚙️ سایر گزارشات"
     ]);
     if (!$createForumTopic['ok']) {
         $texterror = "❌ ربات ادمین گروه نیست";
@@ -3593,9 +3671,11 @@ $caption";
     if ($errorreport != $createForumTopic['result']['message_thread_id']) {
         update("topicid", "idreport", $createForumTopic['result']['message_thread_id'], "report", "otherreport");
     }
+    sleep(5);
+
     $createForumTopic = telegram('createForumTopic', [
         'chat_id' => $text,
-        'name' => "❌ گزارش خطا ها"
+        'name'   => "❌ گزارش خطا ها"
     ]);
     if (!$createForumTopic['ok']) {
         $texterror = "❌ ربات ادمین گروه نیست";
@@ -3605,9 +3685,11 @@ $caption";
     if ($errorreport != $createForumTopic['result']['message_thread_id']) {
         update("topicid", "idreport", $createForumTopic['result']['message_thread_id'], "report", "errorreport");
     }
+    sleep(5);
+
     $createForumTopic = telegram('createForumTopic', [
         'chat_id' => $text,
-        'name' => "💰 گزارش مالی"
+        'name'   => "💰 گزارش مالی"
     ]);
     if (!$createForumTopic['ok']) {
         $texterror = "❌ ربات ادمین گروه نیست";
@@ -3617,9 +3699,12 @@ $caption";
     if ($paymentreports != $createForumTopic['result']['message_thread_id']) {
         update("topicid", "idreport", $createForumTopic['result']['message_thread_id'], "report", "paymentreport");
     }
+
+
     sendmessage($from_id, $textbotlang['Admin']['Channel']['SetChannelReport'], $setting_panel, 'HTML');
     update("setting", "Channel_Report", $text);
     step('home', $from_id);
+
 } elseif ($text == "🏬 تنظیمات فروشگاه" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['users']['selectoption'], $shopkeyboard, 'HTML');
 } elseif ($text == "🛍 اضافه کردن محصول" && $adminrulecheck['rule'] == "administrator") {
@@ -7398,6 +7483,130 @@ n2", $backadmin, 'HTML');
             'parse_mode' => "HTML"
         ]);
     }
+} elseif ($datain == "cronjobs_settings" && $adminrulecheck['rule'] == "administrator") {
+    if (!function_exists('buildCronJobsKeyboard')) {
+        sendmessage($from_id, "امکان مدیریت کرون‌ها در این نسخه فعال نشده است.", $backadmin, 'HTML');
+        return;
+    }
+    $cronIntro = "برای تغییر زمان‌بندی هر کرون، دکمه «⚙️ تنظیمات» همان ردیف را انتخاب کنید.";
+    sendmessage($from_id, $cronIntro, buildCronJobsKeyboard(), 'HTML');
+} elseif (preg_match('/^cronjob_config-([A-Za-z0-9_]+)/', $datain, $cronMatches) && $adminrulecheck['rule'] == "administrator") {
+    if (!function_exists('getCronJobDefinitions') || !function_exists('loadCronSchedules') || !function_exists('describeCronSchedule')) {
+        sendmessage($from_id, "امکان مدیریت کرون‌ها در این نسخه فعال نشده است.", $backadmin, 'HTML');
+        return;
+    }
+    $jobKey = $cronMatches[1];
+    $definitions = getCronJobDefinitions();
+    if (!isset($definitions[$jobKey])) {
+        sendmessage($from_id, "کرون انتخابی یافت نشد.", $backadmin, 'HTML');
+        return;
+    }
+    $schedules = loadCronSchedules();
+    $currentSchedule = $schedules[$jobKey] ?? $definitions[$jobKey]['default'];
+    $readableSchedule = describeCronSchedule($currentSchedule);
+    $definitionLabel = $definitions[$jobKey]['admin_label'];
+    $isDisabled = isset($currentSchedule['unit']) && $currentSchedule['unit'] === 'disabled';
+    $toggleText = $isDisabled ? '✅ فعال‌سازی کرون' : '❌ غیرفعال‌سازی کرون';
+    $toggleAction = $isDisabled ? 'enable' : 'disable';
+
+    $unitKeyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "دقیقه‌ای", 'callback_data' => "cronjob_unit-{$jobKey}-minute"],
+                ['text' => "ساعتی", 'callback_data' => "cronjob_unit-{$jobKey}-hour"],
+                ['text' => "روزانه", 'callback_data' => "cronjob_unit-{$jobKey}-day"],
+            ],
+            [
+                ['text' => $toggleText, 'callback_data' => "cronjob_toggle-{$jobKey}-{$toggleAction}"],
+            ],
+            [
+                ['text' => "🔙 بازگشت", 'callback_data' => "cronjobs_settings"],
+            ],
+        ],
+    ], JSON_UNESCAPED_UNICODE);
+    $message = "⏱ زمان‌بندی فعلی «{$definitionLabel}»: {$readableSchedule}\n\nواحد مورد نظر را انتخاب کنید.";
+    sendmessage($from_id, $message, $unitKeyboard, 'HTML');
+} elseif (preg_match('/^cronjob_toggle-([A-Za-z0-9_]+)-(enable|disable)$/', $datain, $cronMatches) && $adminrulecheck['rule'] == "administrator") {
+    if (!function_exists('getCronJobDefinitions') || !function_exists('updateCronSchedule') || !function_exists('describeCronSchedule')) {
+        sendmessage($from_id, "امکان مدیریت کرون‌ها در این نسخه فعال نشده است.", $backadmin, 'HTML');
+        return;
+    }
+    $jobKey = $cronMatches[1];
+    $action = $cronMatches[2];
+    $definitions = getCronJobDefinitions();
+    if (!isset($definitions[$jobKey])) {
+        sendmessage($from_id, "کرون انتخابی یافت نشد.", $backadmin, 'HTML');
+        return;
+    }
+
+    if ($action === 'disable') {
+        $newSchedule = ['unit' => 'disabled', 'value' => 1];
+        $statusText = "کرون «{$definitions[$jobKey]['admin_label']}» غیرفعال شد.";
+    } else {
+        $newSchedule = $definitions[$jobKey]['default'] ?? ['unit' => 'minute', 'value' => 1];
+        $description = describeCronSchedule($newSchedule);
+        $statusText = "کرون «{$definitions[$jobKey]['admin_label']}» فعال شد. زمان‌بندی فعلی: {$description}";
+    }
+
+    if (!updateCronSchedule($jobKey, $newSchedule)) {
+        sendmessage($from_id, "خطا در ذخیره‌سازی تنظیمات کرون.", $backadmin, 'HTML');
+        return;
+    }
+
+    sendmessage($from_id, $statusText, buildCronJobsKeyboard(), 'HTML');
+} elseif (preg_match('/^cronjob_unit-([A-Za-z0-9_]+)-(minute|hour|day)$/', $datain, $cronMatches) && $adminrulecheck['rule'] == "administrator") {
+    if (!function_exists('getCronJobDefinitions')) {
+        sendmessage($from_id, "امکان مدیریت کرون‌ها در این نسخه فعال نشده است.", $backadmin, 'HTML');
+        return;
+    }
+    $jobKey = $cronMatches[1];
+    $unit = $cronMatches[2];
+    $definitions = getCronJobDefinitions();
+    if (!isset($definitions[$jobKey])) {
+        sendmessage($from_id, "کرون انتخابی یافت نشد.", $backadmin, 'HTML');
+        return;
+    }
+    $payload = json_encode(['cron_key' => $jobKey, 'unit' => $unit], JSON_UNESCAPED_UNICODE);
+    update("user", "Processing_value", $payload, "id", $from_id);
+    step("cronjob_set_value", $from_id);
+    $unitTitle = getCronUnitTitle($unit);
+    sendmessage($from_id, "🔢 مقدار جدید (به صورت عدد) برای بازه زمانی {$unitTitle} ارسال کنید.", $backadmin, 'HTML');
+} elseif ($user['step'] == "cronjob_set_value") {
+    $pending = json_decode($user['Processing_value'], true);
+    if (!is_array($pending) || empty($pending['cron_key']) || empty($pending['unit'])) {
+        sendmessage($from_id, "درخواست نامعتبر است.", $backadmin, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    if (!ctype_digit($text) || intval($text) < 1) {
+        sendmessage($from_id, $textbotlang['Admin']['agent']['invalidvlue'], $backadmin, 'HTML');
+        return;
+    }
+    if (!function_exists('updateCronSchedule') || !function_exists('getCronJobDefinitions') || !function_exists('describeCronSchedule')) {
+        sendmessage($from_id, "امکان ذخیره‌سازی تنظیمات کرون وجود ندارد.", $backadmin, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $definitions = getCronJobDefinitions();
+    $jobKey = $pending['cron_key'];
+    if (!isset($definitions[$jobKey])) {
+        sendmessage($from_id, "کرون انتخابی یافت نشد.", $backadmin, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $value = intval($text);
+    if (!updateCronSchedule($jobKey, ['unit' => $pending['unit'], 'value' => $value])) {
+        sendmessage($from_id, "خطا در ذخیره‌سازی تنظیمات کرون.", $backadmin, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $schedules = loadCronSchedules();
+    $currentSchedule = $schedules[$jobKey] ?? ['unit' => $pending['unit'], 'value' => $value];
+    $description = describeCronSchedule($currentSchedule);
+    $label = $definitions[$jobKey]['admin_label'];
+    sendmessage($from_id, "✅ زمان‌بندی «{$label}» به {$description} تغییر کرد.", buildCronJobsKeyboard(), 'HTML');
+    update("user", "Processing_value", "", "id", $from_id);
+    step('home', $from_id);
 } elseif ($datain == "settimecornremovevolume" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['cronjob']['setvolumeremove'] . $setting['cronvolumere'] . "روز", $backadmin, 'HTML');
     step("getcronvolumere", $from_id);
@@ -9765,7 +9974,16 @@ f,n.n2", $backadmin, 'HTML');
     step("home", $from_id);
     update("PaySetting", "ValuePay", $text, "NamePay", "maxbalancezarinpal");
 } elseif ($user['step'] == "walletaddresssiranpay") {
-    $walletInput = trim((string) $text);
+    $walletInputSource = $text;
+    if (isset($update) && is_array($update)) {
+        if (isset($update['message']['text']) && is_string($update['message']['text'])) {
+            $walletInputSource = $update['message']['text'];
+        } elseif (isset($update['edited_message']['text']) && is_string($update['edited_message']['text'])) {
+            $walletInputSource = $update['edited_message']['text'];
+        }
+    }
+
+    $walletInput = trim((string) $walletInputSource);
 
     $userRecord = select("user", "*", "id", $from_id, "select");
     $processingData = [];
@@ -9784,7 +10002,7 @@ f,n.n2", $backadmin, 'HTML');
         return;
     }
 
-    $standardizedWallet = strtoupper($walletInput);
+    $standardizedWallet = $walletInput;
 
     $successKeyboard = $walletOrigin === 'trnado' ? $trnado : $keyboardadmin;
 
@@ -12893,3 +13111,8 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     update("PaySetting", "ValuePay", $text, "NamePay", "marchent_floypay");
     step('home', $from_id);
 }
+
+
+
+
+
