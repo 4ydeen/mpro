@@ -1,25 +1,41 @@
 <?php
 ignore_user_abort(true);
-set_time_limit(0);
+set_time_limit(120);
+
+$lockFile = __DIR__ . '/cron.lock';
+if (file_exists($lockFile)) {
+    $fileAge = time() - filemtime($lockFile);
+    if ($fileAge < 55) {
+        die("Locked\n");
+    }
+}
+touch($lockFile);
 
 $functionBootstrap = __DIR__ . '/function.php';
 if (!is_readable($functionBootstrap)) {
     $functionBootstrap = __DIR__ . '/../function.php';
 }
+
+$bootstrapLoaded = false;
 if (is_readable($functionBootstrap)) {
-    require_once $functionBootstrap;
+    try {
+        require_once $functionBootstrap;
+        $bootstrapLoaded = true;
+    } catch (Throwable $e) {
+        // Continue without bootstrap
+    }
 }
 
 if (isset($conn) && $conn instanceof mysqli) {
-    $conn->close();
+    try { $conn->close(); } catch (Throwable $e) {}
 } elseif (isset($mysqli) && $mysqli instanceof mysqli) {
-    $mysqli->close();
+    try { $mysqli->close(); } catch (Throwable $e) {}
 } elseif (isset($db) && $db instanceof PDO) {
     $db = null;
 }
 
 if (function_exists('mysqli_close') && isset($GLOBALS['conn'])) {
-    @mysqli_close($GLOBALS['conn']);
+    try { @mysqli_close($GLOBALS['conn']); } catch (Throwable $e) {}
 }
 
 $host = null;
@@ -60,25 +76,17 @@ $buildCronUrl = static function (string $script) use ($host): string {
 function callEndpoint(string $url): void
 {
     $ch = curl_init($url);
-
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_TIMEOUT        => 50,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT        => 30,
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_FORBID_REUSE   => true,
     ]);
-
-    $response = curl_exec($ch);
-    $errno    = curl_errno($ch);
-    $error    = curl_error($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
+    
+    curl_exec($ch);
     curl_close($ch);
-
-    if ($errno !== 0 || $httpCode >= 400) {
-        error_log("Cron call failed: {$url} | errno={$errno} error={$error} http={$httpCode}");
-    }
     
     sleep(1);
 }
@@ -88,9 +96,14 @@ $minute    = (int) date('i', $now);
 $hour      = (int) date('G', $now);
 $dayOfYear = (int) date('z', $now);
 
+if (!defined('APP_ROOT_PATH')) {
+    define('APP_ROOT_PATH', dirname(__DIR__));
+}
+
 $stateDirectory = defined('APP_ROOT_PATH') ? APP_ROOT_PATH : __DIR__;
 $runtimeStatePath = $stateDirectory . '/cron_runtime_state.json';
 $runtimeState = [];
+
 if (is_readable($runtimeStatePath)) {
     $stateContents = file_get_contents($runtimeStatePath);
     if ($stateContents !== false) {
@@ -105,43 +118,35 @@ $runtimeStateChanged = false;
 $getIntervalSeconds = static function (array $schedule): int {
     $unit = isset($schedule['unit']) ? strtolower((string) $schedule['unit']) : 'minute';
     $value = isset($schedule['value']) ? (int) $schedule['value'] : 1;
-    if ($value < 1) {
-        $value = 1;
-    }
+    if ($value < 1) $value = 1;
 
     switch ($unit) {
-        case 'minute':
-            return $value * 60;
-        case 'hour':
-            return $value * 3600;
-        case 'day':
-            return $value * 86400;
-        default:
-            return 0;
+        case 'minute': return $value * 60;
+        case 'hour':   return $value * 3600;
+        case 'day':    return $value * 86400;
+        default:       return 0;
     }
 };
 
-if (function_exists('getCronJobDefinitions') && function_exists('shouldRunCronJob')) {
+if ($bootstrapLoaded && function_exists('getCronJobDefinitions') && function_exists('shouldRunCronJob')) {
     $definitions = getCronJobDefinitions();
     $schedules = function_exists('loadCronSchedules') ? loadCronSchedules() : [];
 
     foreach ($definitions as $key => $definition) {
-        if (empty($definition['script'])) {
-            continue;
-        }
+        if (empty($definition['script'])) continue;
+        
         $defaultConfig = $definition['default'] ?? ['unit' => 'minute', 'value' => 1];
         $schedule = $schedules[$key] ?? $defaultConfig;
-        if (!shouldRunCronJob($schedule, $minute, $hour, $dayOfYear)) {
-            continue;
-        }
+        
+        if (!shouldRunCronJob($schedule, $minute, $hour, $dayOfYear)) continue;
 
         $intervalSeconds = $getIntervalSeconds($schedule);
         $lastRun = isset($runtimeState[$key]) ? (int) $runtimeState[$key] : 0;
-        if ($intervalSeconds > 0 && ($now - $lastRun) < $intervalSeconds) {
-            continue;
-        }
+        
+        if ($intervalSeconds > 0 && ($now - $lastRun) < $intervalSeconds) continue;
 
         callEndpoint($buildCronUrl($definition['script']));
+        
         if ($intervalSeconds > 0) {
             $runtimeState[$key] = $now;
             $runtimeStateChanged = true;
@@ -149,12 +154,8 @@ if (function_exists('getCronJobDefinitions') && function_exists('shouldRunCronJo
     }
 } else {
     $everyMinute = [
-        'croncard.php',
-        'NoticationsService.php',
-        'sendmessage.php',
-        'activeconfig.php',
-        'disableconfig.php',
-        'iranpay1.php',
+        'croncard.php', 'NoticationsService.php', 'sendmessage.php',
+        'activeconfig.php', 'disableconfig.php', 'iranpay1.php',
     ];
 
     foreach ($everyMinute as $script) {
@@ -176,12 +177,7 @@ if (function_exists('getCronJobDefinitions') && function_exists('shouldRunCronJo
     }
 
     if ($minute % 15 === 0) {
-        foreach ([
-            'statusday.php',
-            'on_hold.php',
-            'uptime_node.php',
-            'uptime_panel.php',
-        ] as $script) {
+        foreach (['statusday.php', 'on_hold.php', 'uptime_node.php', 'uptime_panel.php'] as $script) {
             callEndpoint($buildCronUrl($script));
         }
     }
@@ -201,6 +197,10 @@ if ($runtimeStateChanged) {
         json_encode($runtimeState, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
         LOCK_EX
     );
+}
+
+if (file_exists($lockFile)) {
+    @unlink($lockFile);
 }
 
 echo "OK\n";
