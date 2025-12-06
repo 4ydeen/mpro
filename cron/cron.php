@@ -1,10 +1,25 @@
 <?php
+ignore_user_abort(true);
+set_time_limit(0);
+
 $functionBootstrap = __DIR__ . '/function.php';
 if (!is_readable($functionBootstrap)) {
     $functionBootstrap = __DIR__ . '/../function.php';
 }
 if (is_readable($functionBootstrap)) {
     require_once $functionBootstrap;
+}
+
+if (isset($conn) && $conn instanceof mysqli) {
+    $conn->close();
+} elseif (isset($mysqli) && $mysqli instanceof mysqli) {
+    $mysqli->close();
+} elseif (isset($db) && $db instanceof PDO) {
+    $db = null;
+}
+
+if (function_exists('mysqli_close') && isset($GLOBALS['conn'])) {
+    @mysqli_close($GLOBALS['conn']);
 }
 
 $host = null;
@@ -51,6 +66,7 @@ function callEndpoint(string $url): void
         CURLOPT_CONNECTTIMEOUT => 10,
         CURLOPT_TIMEOUT        => 50,
         CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_FOLLOWLOCATION => true,
     ]);
 
     $response = curl_exec($ch);
@@ -63,6 +79,8 @@ function callEndpoint(string $url): void
     if ($errno !== 0 || $httpCode >= 400) {
         error_log("Cron call failed: {$url} | errno={$errno} error={$error} http={$httpCode}");
     }
+    
+    sleep(1);
 }
 
 $now       = time();
