@@ -6573,6 +6573,15 @@ n2", $backadmin, 'HTML');
     $textmax = "📌 حداکثر مبلغی که می خواهید کاربر حساب خود را شارژ کند را تعیین کنید";
     sendmessage($from_id, $textmax, $backadmin, 'HTML');
     step('maxbalance', $from_id);
+} elseif ($datain == "walletaddress" && $adminrulecheck['rule'] == "administrator") {
+    $PaySetting = select("PaySetting", "ValuePay", "NamePay", "walletaddress", "select");
+    $currentWallet = $PaySetting['ValuePay'] ?? '';
+    $texttronseller = "💼 لطفاً آدرس ولت ترون (TRC20) خود را ارسال کنید.\n\nولت فعلی شما: {$currentWallet}";
+    sendmessage($from_id, $texttronseller, $backadmin, 'HTML');
+
+    savedata('clear', 'walletaddress_origin', 'general');
+
+    step('walletaddresssiranpay', $from_id);
 } elseif ($user['step'] == "maxbalance") {
     if (!ctype_digit($text)) {
         sendmessage($from_id, $textbotlang['Admin']['agent']['invalidvlue'], $backadmin, 'HTML');
@@ -9104,6 +9113,9 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
                 ['text' => "⬇️ حداقل شارژ موجودی", 'callback_data' => "mainbalanceaccount"],
             ],
             [
+                ['text' => "آدرس ولت", 'callback_data' => "walletaddress"],
+            ],
+            [
                 ['text' => "❌ بستن", 'callback_data' => 'close_stat']
             ],
         ]
@@ -9343,6 +9355,9 @@ n2", $backadmin, 'HTML');
             [
                 ['text' => "⬆️ حداکثر شارژ موجودی", 'callback_data' => "maxbalanceaccount"],
                 ['text' => "⬇️ حداقل شارژ موجودی", 'callback_data' => "mainbalanceaccount"],
+            ],
+            [
+                ['text' => "آدرس ولت", 'callback_data' => "walletaddress"],
             ],
             [
                 ['text' => "❌ بستن", 'callback_data' => 'close_stat']
@@ -13111,8 +13126,6 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     update("PaySetting", "ValuePay", $text, "NamePay", "marchent_floypay");
     step('home', $from_id);
 }
-
-
 
 
 
