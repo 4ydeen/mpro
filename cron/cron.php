@@ -3,13 +3,19 @@ ignore_user_abort(true);
 set_time_limit(120);
 
 $lockFile = __DIR__ . '/cron.lock';
-if (file_exists($lockFile)) {
-    $fileAge = time() - filemtime($lockFile);
-    if ($fileAge < 55) {
-        die("Locked\n");
-    }
+$lockHandle = fopen($lockFile, 'c');
+if ($lockHandle === false) {
+    die("LockError\n");
 }
-touch($lockFile);
+if (!flock($lockHandle, LOCK_EX | LOCK_NB)) {
+    fclose($lockHandle);
+    die("Locked\n");
+}
+register_shutdown_function(function () use ($lockHandle, $lockFile) {
+    flock($lockHandle, LOCK_UN);
+    fclose($lockHandle);
+    @unlink($lockFile);
+});
 
 $functionBootstrap = __DIR__ . '/function.php';
 if (!is_readable($functionBootstrap)) {
@@ -22,7 +28,6 @@ if (is_readable($functionBootstrap)) {
         require_once $functionBootstrap;
         $bootstrapLoaded = true;
     } catch (Throwable $e) {
-        // Continue without bootstrap
     }
 }
 
@@ -51,26 +56,21 @@ if ($host === null || trim((string) $host) === '') {
     $host = 'localhost';
 }
 
-$buildCronUrl = static function (string $script) use ($host): string {
+$hostConfig = $host;
+if (!preg_match('~^https?://~i', $hostConfig)) {
+    $hostConfig = 'https://' . ltrim($hostConfig);
+}
+
+$parts    = parse_url($hostConfig);
+$scheme   = $parts['scheme'] ?? 'https';
+$hostOnly = $parts['host']   ?? 'localhost';
+$basePath = rtrim($parts['path'] ?? '', '/');
+
+$buildCronUrl = static function (string $script) use ($scheme, $hostOnly, $basePath): string {
     $script = ltrim($script, '/');
-
-    if (function_exists('buildCronScriptUrlByHost')) {
-        return buildCronScriptUrlByHost($host, $script);
-    }
-
     $prefix = 'cronbot';
-    if (function_exists('getCronHttpRelativePrefix')) {
-        $candidate = getCronHttpRelativePrefix();
-        if (is_string($candidate) && trim($candidate, "/\\") !== '') {
-            $prefix = trim($candidate, "/\\");
-        }
-    }
-
-    $normalizedHost = preg_match('~^https?://~i', $host)
-        ? rtrim($host, '/')
-        : 'https://' . trim($host, '/');
-
-    return $normalizedHost . '/' . $prefix . '/' . $script;
+    $path = $basePath === '' ? '' : $basePath . '/';
+    return $scheme . '://' . $hostOnly . $path . $prefix . '/' . $script;
 };
 
 function callEndpoint(string $url): void
@@ -121,7 +121,7 @@ $getIntervalSeconds = static function (array $schedule): int {
     if ($value < 1) $value = 1;
 
     switch ($unit) {
-        case 'minute': return $value * 60;
+        case 'minute': return 0;
         case 'hour':   return $value * 3600;
         case 'day':    return $value * 86400;
         default:       return 0;
@@ -197,10 +197,6 @@ if ($runtimeStateChanged) {
         json_encode($runtimeState, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
         LOCK_EX
     );
-}
-
-if (file_exists($lockFile)) {
-    @unlink($lockFile);
 }
 
 echo "OK\n";
