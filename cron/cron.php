@@ -100,9 +100,9 @@ if (!defined('APP_ROOT_PATH')) {
     define('APP_ROOT_PATH', dirname(__DIR__));
 }
 
-$stateDirectory = defined('APP_ROOT_PATH') ? APP_ROOT_PATH : __DIR__;
+$stateDirectory   = defined('APP_ROOT_PATH') ? APP_ROOT_PATH : __DIR__;
 $runtimeStatePath = $stateDirectory . '/cron_runtime_state.json';
-$runtimeState = [];
+$runtimeState     = [];
 
 if (is_readable($runtimeStatePath)) {
     $stateContents = file_get_contents($runtimeStatePath);
@@ -116,41 +116,57 @@ if (is_readable($runtimeStatePath)) {
 $runtimeStateChanged = false;
 
 $getIntervalSeconds = static function (array $schedule): int {
-    $unit = isset($schedule['unit']) ? strtolower((string) $schedule['unit']) : 'minute';
+    $unit  = isset($schedule['unit']) ? strtolower((string) $schedule['unit']) : 'minute';
     $value = isset($schedule['value']) ? (int) $schedule['value'] : 1;
     if ($value < 1) $value = 1;
 
     switch ($unit) {
-        case 'minute': return 0;
-        case 'hour':   return $value * 3600;
-        case 'day':    return $value * 86400;
-        default:       return 0;
+        case 'minute':   return 0;
+        case 'hour':     return $value * 3600;
+        case 'day':      return $value * 86400;
+        case 'disabled': return 0;
+        default:         return 0;
     }
 };
 
 if ($bootstrapLoaded && function_exists('getCronJobDefinitions') && function_exists('shouldRunCronJob')) {
     $definitions = getCronJobDefinitions();
-    $schedules = function_exists('loadCronSchedules') ? loadCronSchedules() : [];
+    $schedules   = function_exists('loadCronSchedules') ? loadCronSchedules() : [];
 
     foreach ($definitions as $key => $definition) {
-        if (empty($definition['script'])) continue;
-        
+        if (empty($definition['script'])) {
+            continue;
+        }
+
         $defaultConfig = $definition['default'] ?? ['unit' => 'minute', 'value' => 1];
-        $schedule = $schedules[$key] ?? $defaultConfig;
-        
-        if (!shouldRunCronJob($schedule, $minute, $hour, $dayOfYear)) continue;
+        $schedule      = $schedules[$key] ?? $defaultConfig;
+        $unit          = strtolower($schedule['unit'] ?? 'minute');
+
+        if ($unit === 'disabled') {
+            continue;
+        }
+
+        if ($unit === 'minute') {
+            if (!shouldRunCronJob($schedule, $minute, $hour, $dayOfYear)) {
+                continue;
+            }
+            callEndpoint($buildCronUrl($definition['script']));
+            continue;
+        }
 
         $intervalSeconds = $getIntervalSeconds($schedule);
+        if ($intervalSeconds <= 0) {
+            continue;
+        }
+
         $lastRun = isset($runtimeState[$key]) ? (int) $runtimeState[$key] : 0;
-        
-        if ($intervalSeconds > 0 && ($now - $lastRun) < $intervalSeconds) continue;
+        if (($now - $lastRun) < $intervalSeconds) {
+            continue;
+        }
 
         callEndpoint($buildCronUrl($definition['script']));
-        
-        if ($intervalSeconds > 0) {
-            $runtimeState[$key] = $now;
-            $runtimeStateChanged = true;
-        }
+        $runtimeState[$key] = $now;
+        $runtimeStateChanged = true;
     }
 } else {
     $everyMinute = [
