@@ -90,21 +90,13 @@ if (!defined('APP_ROOT_PATH')) {
     define('APP_ROOT_PATH', dirname(__DIR__));
 }
 
-$stateDirectory   = defined('APP_ROOT_PATH') ? APP_ROOT_PATH : __DIR__;
-$runtimeStatePath = $stateDirectory . '/cron_runtime_state.json';
-$runtimeState     = [];
+$pdo = getDatabaseConnection();
+$runtimeState = [];
 
- 
-if (is_readable($runtimeStatePath)) {
-    $stateContents = file_get_contents($runtimeStatePath);
-    if ($stateContents !== false) {
-        $decodedState = json_decode($stateContents, true);
-        if (is_array($decodedState)) {
-            $runtimeState = $decodedState;
-        }
-    }
+if ($pdo instanceof PDO) {
+    ensureCronRuntimeStateTable($pdo);
+    $runtimeState = loadCronRuntimeState($pdo);
 }
-$runtimeStateChanged = false;
 
 $getIntervalSeconds = static function (array $schedule): int {
     $unit  = isset($schedule['unit']) ? strtolower((string) $schedule['unit']) : 'minute';
@@ -151,7 +143,9 @@ if ($bootstrapLoaded && function_exists('getCronJobDefinitions') && function_exi
         }
         callEndpoint($buildCronUrl($definition['script']));
         $runtimeState[$key] = $now;
-        $runtimeStateChanged = true;
+        if ($pdo instanceof PDO) {
+            setCronJobLastRun($pdo, $key, $now);
+        }
     }
 
     
@@ -210,12 +204,4 @@ if ($bootstrapLoaded && function_exists('getCronJobDefinitions') && function_exi
 }
 
  
-if ($runtimeStateChanged) {
-    file_put_contents(
-        $runtimeStatePath,
-        json_encode($runtimeState, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
-        LOCK_EX
-    );
-}
-
 echo "OK\n";
