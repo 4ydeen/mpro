@@ -2646,11 +2646,6 @@ function activecron()
 }
 
 
-function getCronScheduleStoragePath(): string
-{
-    return APP_ROOT_PATH . '/cron_schedule.json';
-}
-
 function getCronJobDefinitions(): array
 {
     return [
@@ -2790,56 +2785,100 @@ function normalizeCronScheduleConfig(array $config, array $default): array
     ];
 }
 
+function ensureCronRuntimeStateTable(PDO $pdo): void
+{
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS cron_runtime_state (
+            job_key VARCHAR(255) PRIMARY KEY,
+            last_run BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+            unit VARCHAR(20) NOT NULL DEFAULT 'minute',
+            value INT(10) UNSIGNED NOT NULL DEFAULT 1,
+            enabled TINYINT(1) NOT NULL DEFAULT 1,
+            created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci");
+    } catch (PDOException $e) {
+        error_log('ensureCronRuntimeStateTable: ' . $e->getMessage());
+    }
+}
+
+function loadCronRuntimeState(PDO $pdo): array
+{
+    $state = [];
+    try {
+        $stmt = $pdo->query("SELECT job_key, last_run FROM cron_runtime_state");
+        if ($stmt !== false) {
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $jobKey = isset($row['job_key']) ? trim((string) $row['job_key']) : '';
+                if ($jobKey === '') {
+                    continue;
+                }
+                $state[$jobKey] = isset($row['last_run']) ? (int) $row['last_run'] : 0;
+            }
+        }
+    } catch (PDOException $e) {
+        error_log('loadCronRuntimeState: ' . $e->getMessage());
+    }
+
+    return $state;
+}
+
+function setCronJobLastRun(PDO $pdo, string $jobKey, int $timestamp): void
+{
+    $jobKey = trim($jobKey);
+    if ($jobKey === '') {
+        return;
+    }
+
+    try {
+        $stmt = $pdo->prepare("INSERT INTO cron_runtime_state (job_key, last_run) VALUES (:job_key, :last_run) ON DUPLICATE KEY UPDATE last_run = VALUES(last_run)");
+        $stmt->bindValue(':job_key', $jobKey, PDO::PARAM_STR);
+        $stmt->bindValue(':last_run', $timestamp, PDO::PARAM_INT);
+        $stmt->execute();
+    } catch (PDOException $e) {
+        error_log('setCronJobLastRun: ' . $e->getMessage());
+    }
+}
+
 function loadCronSchedules(): array
 {
+    $definitions = getCronJobDefinitions();
     $schedules = getDefaultCronSchedules();
-    $storagePath = getCronScheduleStoragePath();
-    if (!is_readable($storagePath)) {
+    $pdo = getDatabaseConnection();
+    if (!($pdo instanceof PDO)) {
         return $schedules;
     }
 
-    $rawData = file_get_contents($storagePath);
-    if ($rawData === false) {
-        return $schedules;
-    }
+    ensureCronRuntimeStateTable($pdo);
 
-    $decoded = json_decode($rawData, true);
-    if (!is_array($decoded)) {
-        return $schedules;
-    }
-
-    foreach ($schedules as $key => $default) {
-        if (isset($decoded[$key]) && is_array($decoded[$key])) {
-            $schedules[$key] = normalizeCronScheduleConfig($decoded[$key], $default);
+    try {
+        $stmt = $pdo->query("SELECT job_key, unit, value, enabled FROM cron_runtime_state");
+        if ($stmt === false) {
+            return $schedules;
         }
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $jobKey = isset($row['job_key']) ? trim((string) $row['job_key']) : '';
+            if ($jobKey === '' || !isset($definitions[$jobKey])) {
+                continue;
+            }
+
+            $unit = $row['unit'] ?? $definitions[$jobKey]['default']['unit'] ?? 'minute';
+            $value = isset($row['value']) ? (int) $row['value'] : ($definitions[$jobKey]['default']['value'] ?? 1);
+            $enabled = isset($row['enabled']) && (int) $row['enabled'] === 0 ? false : true;
+            $scheduleConfig = ['unit' => $unit, 'value' => $value];
+            if (!$enabled) {
+                $scheduleConfig['unit'] = 'disabled';
+                $scheduleConfig['value'] = 1;
+            }
+
+            $schedules[$jobKey] = normalizeCronScheduleConfig($scheduleConfig, $definitions[$jobKey]['default']);
+        }
+    } catch (PDOException $e) {
+        error_log('loadCronSchedules: ' . $e->getMessage());
     }
 
     return $schedules;
-}
-
-function saveCronSchedules(array $schedules): bool
-{
-    $storagePath = getCronScheduleStoragePath();
-    $directory = dirname($storagePath);
-    if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
-        error_log('Unable to create cron schedule directory: ' . $directory);
-        return false;
-    }
-
-    $normalized = [];
-    foreach (getDefaultCronSchedules() as $key => $default) {
-        $current = $schedules[$key] ?? $default;
-        $normalized[$key] = normalizeCronScheduleConfig($current, $default);
-    }
-
-    ksort($normalized);
-    $encoded = json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-    if ($encoded === false) {
-        error_log('Unable to encode cron schedule configuration to JSON.');
-        return false;
-    }
-
-    return file_put_contents($storagePath, $encoded, LOCK_EX) !== false;
 }
 
 function updateCronSchedule(string $jobKey, array $config): bool
@@ -2849,10 +2888,26 @@ function updateCronSchedule(string $jobKey, array $config): bool
         return false;
     }
 
-    $schedules = loadCronSchedules();
-    $schedules[$jobKey] = normalizeCronScheduleConfig($config, $definitions[$jobKey]['default']);
+    $normalized = normalizeCronScheduleConfig($config, $definitions[$jobKey]['default']);
+    $pdo = getDatabaseConnection();
+    if (!($pdo instanceof PDO)) {
+        return false;
+    }
 
-    return saveCronSchedules($schedules);
+    ensureCronRuntimeStateTable($pdo);
+    $enabled = $normalized['unit'] === 'disabled' ? 0 : 1;
+
+    try {
+        $stmt = $pdo->prepare("INSERT INTO cron_runtime_state (job_key, unit, value, enabled) VALUES (:job_key, :unit, :value, :enabled) ON DUPLICATE KEY UPDATE unit = VALUES(unit), value = VALUES(value), enabled = VALUES(enabled)");
+        $stmt->bindValue(':job_key', $jobKey, PDO::PARAM_STR);
+        $stmt->bindValue(':unit', $normalized['unit'], PDO::PARAM_STR);
+        $stmt->bindValue(':value', $normalized['value'], PDO::PARAM_INT);
+        $stmt->bindValue(':enabled', $enabled, PDO::PARAM_INT);
+        return $stmt->execute();
+    } catch (PDOException $e) {
+        error_log('updateCronSchedule: ' . $e->getMessage());
+        return false;
+    }
 }
 
 function describeCronSchedule(array $config): string
