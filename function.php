@@ -3629,3 +3629,16 @@ function createPayaqayepardakht($price, $order_id)
     curl_close($curl);
     return json_decode($response, true);
 }
+function deleteInvoiceFromList($invoiceId, $userId)
+{
+    global $pdo;
+    try {
+        $stmt = $pdo->prepare("DELETE FROM invoice WHERE id_invoice = :invoiceId AND id_user = :userId");
+        $stmt->bindParam(':invoiceId', $invoiceId);
+        $stmt->bindParam(':userId', $userId);
+        return $stmt->execute();
+    } catch (PDOException $e) {
+        error_log('Failed to delete invoice: ' . $e->getMessage());
+        return false;
+    }
+}
