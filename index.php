@@ -1028,17 +1028,42 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
         update("user", "Processing_value_four", $marzban['name_panel'], "id", $from_id);
     }
     $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $nameloc['username']);
-    if (isset($DataUserOut['msg']) && $DataUserOut['msg'] == "User not found") {
-        update("invoice", "Status", "disabledn", "id_invoice", $nameloc['id_invoice']);
-        sendmessage($from_id, $textbotlang['users']['stateus']['UserNotFound'], $keyboard, 'html');
-        step('home', $from_id);
-        return;
-    }
-    if ($DataUserOut['status'] == "Unsuccessful") {
-        sendmessage($from_id, $textbotlang['users']['stateus']['panelNotConnected'], $keyboard, 'html');
-        step('home', $from_id);
-        return;
-    }
+ if (isset($DataUserOut['msg']) && $DataUserOut['msg'] == "User not found") {
+    update("invoice", "Status", "disabledn", "id_invoice", $nameloc['id_invoice']);
+    $keyboard_remove = [
+        'inline_keyboard' => [
+            [
+                ['text' => $textbotlang['users']['stateus']['deleteFromListBtn'], 'callback_data' => 'deletelist-' . $nameloc['id_invoice']]
+            ],
+            [
+                ['text' => $textbotlang['users']['stateus']['backlist'], 'callback_data' => 'backorder']
+            ]
+        ]
+    ];
+    $keyboard_remove = json_encode($keyboard_remove);
+    $msg = $textbotlang['users']['stateus']['UserNotFound'] . "\n\n" . $textbotlang['users']['stateus']['deleteSuggestion'];
+    sendmessage($from_id, $msg, $keyboard_remove, 'html');
+    step('home', $from_id);
+    return;
+}
+if ($DataUserOut['status'] == "Unsuccessful") {
+    $keyboard_remove = [
+        'inline_keyboard' => [
+            [
+                ['text' => $textbotlang['users']['stateus']['deleteFromListBtn'], 'callback_data' => 'deletelist-' . $nameloc['id_invoice']]
+            ],
+            [
+                ['text' => $textbotlang['users']['stateus']['backlist'], 'callback_data' => 'backorder']
+            ]
+        ]
+    ];
+    $keyboard_remove = json_encode($keyboard_remove);
+    $msg = $textbotlang['users']['stateus']['panelNotConnected'] . "\n\n" . $textbotlang['users']['stateus']['deleteSuggestion'];
+    sendmessage($from_id, $msg, $keyboard_remove, 'html');
+    step('home', $from_id);
+    return;
+}
+
     if ($DataUserOut['online_at'] == "online") {
         $lastonline = 'آنلاین';
     } elseif ($DataUserOut['online_at'] == "offline") {
@@ -1461,7 +1486,23 @@ $textconnect
             'parse_mode' => "HTML"
         ]);
     }
-    sendmessage($from_id, "📌 سرویس با موفقیت حذف شد", null, 'html');
+        sendmessage($from_id, "📌 سرویس با موفقیت حذف شد", null, 'html');
+} elseif (preg_match('/deletelist-(\w+)/', $datain, $dataget)) {
+    $id_invoice = $dataget[1];
+    $nameloc = select("invoice", "*", "id_invoice", $id_invoice, "select");
+    if (is_array($nameloc) && $nameloc['id_user'] == $from_id) {
+        if (function_exists('deleteInvoiceFromList')) {
+            deleteInvoiceFromList($id_invoice, $from_id);
+        } else {
+            $stmtDelete = $pdo->prepare("DELETE FROM invoice WHERE id_invoice = :invoice_id AND id_user = :user_id");
+            $stmtDelete->bindParam(':invoice_id', $id_invoice);
+            $stmtDelete->bindParam(':user_id', $from_id);
+            $stmtDelete->execute();
+        }
+        sendmessage($from_id, "📌 سرویس از لیست شما حذف شد", null, 'html');
+    } else {
+        sendmessage($from_id, "❌ امکان حذف سرویس وجود ندارد.", null, 'html');
+    }
 } elseif (preg_match('/config_(\w+)/', $datain, $dataget) || (is_string($text) && strpos($text, "/link ") !== false)) {
     $textCommand = is_string($text) ? $text : '';
     if ($textCommand !== '' && $textCommand[0] === "/") {
